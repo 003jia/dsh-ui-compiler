@@ -1,0 +1,127 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DSH UI compiler component mapping",
+  "type": "object",
+  "required": ["target", "packages", "components"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "target": {
+      "type": "object",
+      "required": ["framework", "styles", "copy"],
+      "additionalProperties": false,
+      "properties": {
+        "framework": { "const": "react18" },
+        "styles": { "const": "css-modules" },
+        "copy": { "const": "zh-en-dictionary" }
+      }
+    },
+    "packages": {
+      "type": "object",
+      "required": ["primitives", "theme"],
+      "additionalProperties": false,
+      "properties": {
+        "primitives": { "type": "string", "pattern": "^@deepseek-ai/dsh-client-ui-primitives@[0-9]" },
+        "theme": { "type": "string", "pattern": "^@deepseek-ai/dsh-client-ui-theme@[0-9]" }
+      }
+    },
+    "components": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^DSH/[A-Z][A-Za-z0-9]*$": { "$ref": "#/definitions/component" }
+      }
+    }
+  },
+  "definitions": {
+    "component": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ignore"],
+          "additionalProperties": false,
+          "properties": { "ignore": { "const": true } }
+        },
+        {
+          "type": "object",
+          "required": ["import", "props"],
+          "additionalProperties": false,
+          "properties": {
+            "import": {
+              "type": "object",
+              "required": ["from", "name"],
+              "additionalProperties": false,
+              "properties": {
+                "from": { "const": "@deepseek-ai/dsh-client-ui-primitives" },
+                "name": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" }
+              }
+            },
+            "cornerRadius": {
+              "description": "CSS token for the numeric radius stored by the installed OpenPencil editor.",
+              "type": "object",
+              "required": ["pixels", "token"],
+              "additionalProperties": false,
+              "properties": {
+                "pixels": { "type": "number", "exclusiveMinimum": 0 },
+                "token": { "type": "string", "pattern": "^--dsw-radius-[a-z0-9-]+$" }
+              }
+            },
+            "props": {
+              "type": "object",
+              "additionalProperties": false,
+              "patternProperties": {
+                "^[a-zA-Z][a-zA-Z0-9-]*$": { "$ref": "#/definitions/prop" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "literal": {
+      "anyOf": [
+        { "type": "string" },
+        { "type": "number" },
+        { "type": "boolean" }
+      ]
+    },
+    "prop": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["as"],
+          "additionalProperties": false,
+          "properties": { "as": { "const": "callback" } }
+        },
+        {
+          "type": "object",
+          "required": ["from", "as"],
+          "additionalProperties": false,
+          "properties": {
+            "from": { "type": "string", "pattern": "^text\\.[a-zA-Z][a-zA-Z0-9]*$" },
+            "as": { "const": "copy" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["from"],
+          "anyOf": [
+            { "required": ["type"], "properties": { "type": true } },
+            { "required": ["values"], "properties": { "values": true } }
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "from": { "type": "string", "pattern": "^variant\\.[a-zA-Z][a-zA-Z0-9]*$" },
+            "type": { "enum": ["string", "number", "boolean"] },
+            "values": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "$ref": "#/definitions/literal" }
+            },
+            "default": { "$ref": "#/definitions/literal" }
+          }
+        }
+      ]
+    }
+  }
+}

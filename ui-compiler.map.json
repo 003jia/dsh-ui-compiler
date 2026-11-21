@@ -1,0 +1,40 @@
+{
+  "$schema": "./schemas/map.schema.json",
+  "target": { "framework": "react18", "styles": "css-modules", "copy": "zh-en-dictionary" },
+  "packages": {
+    "primitives": "@deepseek-ai/dsh-client-ui-primitives@0.2.2-alpha.2",
+    "theme": "@deepseek-ai/dsh-client-ui-theme@0.2.2-alpha.2"
+  },
+  "components": {
+    "DSH/Button": {
+      "import": { "from": "@deepseek-ai/dsh-client-ui-primitives", "name": "Button" },
+      "props": {
+        "variant": {
+          "from": "variant.variant",
+          "values": ["primary", "ghost", "outline", "toolbar"],
+          "default": "ghost"
+        },
+        "size": { "from": "variant.size", "values": ["md", "sm"], "default": "md" },
+        "children": { "from": "text.label", "as": "copy" },
+        "onClick": { "as": "callback" }
+      }
+    },
+    "DSH/Input": {
+      "import": { "from": "@deepseek-ai/dsh-client-ui-primitives", "name": "Input" },
+      "cornerRadius": { "pixels": 12, "token": "--dsw-radius-md" },
+      "props": {
+        "placeholder": { "from": "text.placeholder", "as": "copy" },
+        "onChange": { "as": "callback" }
+      }
+    },
+    "DSH/Switch": {
+      "import": { "from": "@deepseek-ai/dsh-client-ui-primitives", "name": "Switch" },
+      "props": {
+        "checked": { "from": "variant.checked", "type": "boolean" },
+        "disabled": { "from": "variant.disabled", "type": "boolean", "default": false },
+        "label": { "from": "text.label", "as": "copy" },
+        "onChange": { "as": "callback" }
+      }
+    }
+  }
+}

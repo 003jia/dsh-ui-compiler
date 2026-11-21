@@ -1,0 +1,68 @@
+{
+  "version": "1.0.0",
+  "variables": {
+    "dsw.alias.bg.base": { "type": "color", "value": "#FFFFFF" },
+    "dsw.radius.md": { "type": "number", "value": 10 }
+  },
+  "children": [
+    {
+      "id": "default",
+      "name": "Settings/default",
+      "type": "frame",
+      "layout": "vertical",
+      "width": 400,
+      "height": 320,
+      "fill": "$dsw.alias.bg.base",
+      "cornerRadius": "$dsw.radius.md",
+      "children": [
+        {
+          "id": "title",
+          "name": "title",
+          "type": "text",
+          "content": "设置"
+        },
+        {
+          "id": "button",
+          "name": "refresh",
+          "type": "ref",
+          "ref": "master"
+        },
+        {
+          "id": "list",
+          "name": "servers[]",
+          "type": "frame",
+          "layout": "horizontal",
+          "children": [
+            { "id": "name", "name": "{name}", "type": "text", "content": "数据" },
+            { "id": "sample", "name": "sample", "type": "text", "content": "示例" }
+          ]
+        },
+        {
+          "id": "asset",
+          "name": "image",
+          "type": "image",
+          "src": "illustration.png",
+          "width": 64,
+          "height": 64
+        },
+        { "id": "annotation", "name": "_note", "type": "text", "content": "标注" },
+        { "id": "hidden", "name": "hidden", "type": "text", "visible": false, "content": "隐藏" }
+      ]
+    },
+    {
+      "id": "loading",
+      "name": "Settings/loading",
+      "type": "frame",
+      "width": 400,
+      "height": 320,
+      "children": [{ "id": "loading-label", "name": "loadingMessage", "type": "text", "content": "正在加载" }]
+    },
+    {
+      "id": "master",
+      "name": "DSH/Button · variant=outline · size=sm",
+      "type": "frame",
+      "reusable": true,
+      "children": [{ "id": "label", "name": "button/label", "type": "text", "content": "刷新" }]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+minimumReleaseAge: 10080
+storeDir: artifacts/pnpm-store
+
+allowBuilds:
+  # This release's postinstall only prints a funding message.
+  core-js@3.51.0: false
+  # The pinned platform package provides the executable directly.
+  esbuild@0.25.12: false
+  esbuild: set this to true or false

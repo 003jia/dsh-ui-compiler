@@ -1,0 +1,15 @@
+.DS_Store
+node_modules/
+.pnpm-store/
+artifacts/
+.dsh/
+.公用.md.lock
+公用.md
+.env
+.env.*
+*.tgz
+harness/dist/
+harness/src/pages/mcp-center/
+tokens/*.json
+design/generated/
+design/pages/*.op

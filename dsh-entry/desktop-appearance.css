@@ -1,0 +1,62 @@
+/* The native theme and the Claude skin both publish their scale on html and body. */
+html[data-uic-appearance="rounded"]:root,
+html[data-uic-appearance="rounded"]:root > body {
+  --dsw-radius-xs: 6px;
+  --dsw-radius-sm: 11px;
+  --dsw-radius-md: 15px;
+  --dsw-radius-lg: 19px;
+  --dsw-radius-xl: 24px;
+  --dsw-radius-panel: 30px;
+  --dsw-corner-shape: superellipse(1.25);
+}
+
+/* These controls have fixed radii in the installed skin. Keep the native
+   sizes and row positions so the workspace tree still scrolls and drags. */
+html[data-uic-appearance="rounded"][data-dsh-claude-ui] [data-slot="sidebar"] nav button,
+html[data-uic-appearance="rounded"][data-dsh-claude-ui] [data-dsh-claude-sidebar-wide] > button,
+html[data-uic-appearance="rounded"] [data-slot="sidebar"] [data-dsh-claude-mode-trigger],
+html[data-uic-appearance="rounded"] [data-slot="sidebar"] [data-dsh-claude-account] {
+  border-radius: var(--dsw-radius-md);
+}
+
+html[data-uic-appearance="rounded"] [data-slot="sidebar"] [data-row-key^="session:"][aria-selected="true"] {
+  background-color: var(--dsw-specific-sidebar-nav-item-active);
+}
+
+/* The compact composer has an independently painted top section. Both arcs
+   follow the card, including while its input has focus. */
+html[data-uic-appearance="rounded"]:root [data-conversation-content] [data-composer-card],
+html[data-uic-appearance="rounded"][data-dsh-claude-ui] [data-content-phase="active"] [data-composer-card][data-claude-composer-v2] {
+  border-radius: var(--dsw-radius-xl);
+}
+
+html[data-uic-appearance="rounded"][data-dsh-claude-ui] [data-content-phase="active"] [data-claude-composer-v2] > [data-input-scroll] {
+  border-start-start-radius: inherit;
+  border-start-end-radius: inherit;
+}
+
+html[data-uic-appearance="rounded"][data-dsh-claude-ui] [data-content-phase="active"] [data-claude-composer-v2]
+  > [data-input-scroll] + div > div:first-child > button[aria-haspopup="listbox"],
+html[data-uic-appearance="rounded"][data-dsh-claude-ui] [data-content-phase="active"] [data-claude-composer-v2]
+  > [data-input-scroll] + div > div:last-child > button {
+  border-radius: 50%;
+  corner-shape: round;
+}
+
+html[data-uic-appearance="rounded"][data-dsh-claude-ui] [data-composer-seat] [data-approval-key] > :has(> [data-approval-scroll]) {
+  border-radius: var(--dsw-radius-lg);
+}
+
+html[data-uic-appearance="rounded"]:root [data-shortcut-modal="settings"] {
+  border-radius: var(--dsw-radius-panel);
+}
+
+html[data-uic-appearance="rounded"]:root [data-shortcut-modal="settings"] > nav > div > button {
+  border-radius: var(--dsw-radius-md);
+}
+
+@media (max-width: 767px) {
+  html[data-uic-appearance="rounded"]:root [data-shortcut-modal="settings"] {
+    border-radius: var(--dsw-radius-lg);
+  }
+}
