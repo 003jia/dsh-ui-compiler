@@ -1,0 +1,50 @@
+{
+  "sourceRevision": "06bfe0d62a98375cb09c942fa18e68bd32cff057",
+  "license": "SIL Open Font License 1.1",
+  "fonts": [
+    {
+      "family": "IBM Plex Mono",
+      "file": "IBMPlexMono-Regular.ttf",
+      "weight": "400",
+      "sha256": "6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46",
+      "source": "https://github.com/google/fonts/blob/06bfe0d62a98375cb09c942fa18e68bd32cff057/ofl/ibmplexmono/IBMPlexMono-Regular.ttf",
+      "licenseFile": "OFL-IBMPlexMono.txt",
+      "axes": {}
+    },
+    {
+      "family": "Newsreader",
+      "file": "Newsreader-VF.ttf",
+      "weight": "200 800",
+      "sha256": "8a08d13f8a6c0d51be379a60af84f945f65369a67e509ee3c3bdcc421254d7c1",
+      "source": "https://github.com/google/fonts/blob/06bfe0d62a98375cb09c942fa18e68bd32cff057/ofl/newsreader/Newsreader%5Bopsz%2Cwght%5D.ttf",
+      "licenseFile": "OFL-Newsreader.txt",
+      "axes": {
+        "wght": [
+          200.0,
+          400.0,
+          800.0
+        ],
+        "opsz": [
+          6.0,
+          18.0,
+          72.0
+        ]
+      }
+    },
+    {
+      "family": "Noto Sans SC",
+      "file": "NotoSansSC-VF.ttf",
+      "weight": "100 900",
+      "sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
+      "source": "https://github.com/google/fonts/blob/06bfe0d62a98375cb09c942fa18e68bd32cff057/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf",
+      "licenseFile": "OFL-NotoSansSC.txt",
+      "axes": {
+        "wght": [
+          100.0,
+          100.0,
+          900.0
+        ]
+      }
+    }
+  ]
+}

@@ -40,7 +40,7 @@ test('project history and preview responses remain distinct even with identical 
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'uic-project-owners-')))
   t.after(() => rm(dir, { recursive: true, force: true }))
   for (const [file, target] of [
-    ['host.mjs', 'ui-compiler-host.mjs'], ['project-binding.mjs', 'project-binding.mjs'], ['preview-host.mjs', 'preview-host.mjs'],
+    ['host.mjs', 'ui-compiler-host.mjs'], ['project-binding.mjs', 'project-binding.mjs'], ['asset-store.mjs', 'asset-store.mjs'], ['agent-editor.mjs', 'agent-editor.mjs'], ['conversations.mjs', 'conversations.mjs'], ['preview-host.mjs', 'preview-host.mjs'],
   ]) await cp(new URL('../dsh-entry/' + file, import.meta.url), join(dir, target))
   await writeFile(join(dir, 'package.json'), '{"type":"module"}')
   await writeFile(join(dir, 'editor-host.js'), 'export const isLoopbackRemoteAddress = value => value === "127.0.0.1"')

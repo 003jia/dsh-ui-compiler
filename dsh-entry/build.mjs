@@ -6,10 +6,11 @@ import { dirname, join, sep } from 'node:path'
 import { previewWorkerFiles } from './preview-build.mjs'
 import ts from 'typescript'
 import { patchCanvasEditorHost } from './agent-editor.mjs'
+import { patchCompilerEditorProcess, patchCompilerSelectionLaunch } from './selection-runtime.mjs'
 
 const upstreamName = '@zseven-w/dsh-openpencil'
 const upstreamVersion = '0.1.0-rc.15'
-const overlayVersion = '0.1.0-rc.15.uic.18'
+const overlayVersion = '0.1.0-rc.15.uic.37'
 const artifactName = `zseven-w-dsh-openpencil-${overlayVersion}.tgz`
 const hostEntry = 'lib/index.js'
 const clientEntry = 'lib/client.js'
@@ -45,13 +46,28 @@ function run(command, args, cwd, env = process.env) {
 function stagePreviewDependencies(workspaceRoot, destination) {
   const visited = new Map()
   const moduleRoot = realpathSync(join(workspaceRoot, 'node_modules')) + sep
-  function include(name, importer, optional = false) {
+  function resolvePackage(name, importer, optional = false) {
     const paths = createRequire(join(importer, 'package.json')).resolve.paths(name) ?? []
     const path = paths.map(base => join(base, name)).find(base => existsSync(join(base, 'package.json')))
     if (!path && optional) return
     if (!path) throw new Error(`Missing preview dependency ${name}`)
     const source = realpathSync(path)
     if (!source.startsWith(moduleRoot)) throw new Error(`Unexpected preview dependency location: ${name}`)
+    return source
+  }
+  function include(name, importer, optional = false) {
+    let source = resolvePackage(name, importer, optional)
+    if (!source) return
+    if (name === 'rollup') {
+      // Vite imports "rollup"; the hardened desktop Node can load Rollup's
+      // official WebAssembly build without loading a third-party native addon.
+      const expected = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8'))
+      source = resolvePackage('@rollup/wasm-node', workspaceRoot)
+      const wasm = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8'))
+      if (expected.name !== 'rollup' || wasm.name !== '@rollup/wasm-node' || wasm.version !== expected.version) {
+        throw new Error(`Preview needs @rollup/wasm-node@${expected.version} to match Vite's Rollup`)
+      }
+    }
     if (visited.has(name)) {
       if (visited.get(name) !== source) throw new Error(`Multiple installed versions of ${name}`)
       return
@@ -96,9 +112,13 @@ function build(upstreamPath) {
     cpSync(join(import.meta.dirname, 'host.mjs'), join(stage, hostHelper))
     cpSync(join(import.meta.dirname, 'preview-host.mjs'), join(stage, previewRoute))
     cpSync(join(import.meta.dirname, 'preview-build.mjs'), join(stage, previewBuild))
-    for (const file of ['agent-host.mjs', 'agent-editor.mjs', 'agent-selection.mjs', 'export-host.mjs', 'project-binding.mjs']) {
+    for (const file of ['agent-host.mjs', 'parallel-agent.mjs', 'agent-editor.mjs', 'agent-selection.mjs', 'export-host.mjs', 'project-binding.mjs', 'asset-store.mjs', 'draw-tools.mjs', 'canvas-tools.mjs', 'canvas-tool-loop.mjs', 'task-plan.mjs', 'conversations.mjs', 'pen-document.mjs', 'pen-context.mjs', 'pen-import.mjs', 'selection-runtime.mjs', 'selection-bridge.mjs', 'font-bridge.mjs', 'font-families.mjs', 'font-faces.mjs', 'font-weights.mjs']) {
       cpSync(join(import.meta.dirname, file), join(stage, 'lib', file))
     }
+    const fontFiles = ['NotoSansSC-VF.ttf', 'Newsreader-VF.ttf', 'IBMPlexMono-Regular.ttf', 'OFL-NotoSansSC.txt',
+      'OFL-Newsreader.txt', 'OFL-IBMPlexMono.txt', 'manifest.json']
+    mkdirSync(join(stage, 'lib/fonts'))
+    for (const file of fontFiles) cpSync(join(import.meta.dirname, 'fonts', file), join(stage, 'lib/fonts', file))
     const wire = readFileSync(join(import.meta.dirname, 'agent-wire.js'), 'utf8')
     writeFileSync(join(stage, 'lib/agent-wire.mjs'), wire + '\nexport { canvasAgentContribution };\n')
     const service = ts.transpileModule(readFileSync(join(import.meta.dirname, 'agent-service.ts'), 'utf8'), {
@@ -106,7 +126,9 @@ function build(upstreamPath) {
     })
     writeFileSync(join(stage, 'lib/agent-service.mjs'), service.outputText)
     const editorHostFile = join(stage, 'lib/editor-host.js')
-    writeFileSync(editorHostFile, patchCanvasEditorHost(readFileSync(editorHostFile, 'utf8')))
+    writeFileSync(editorHostFile, patchCompilerSelectionLaunch(patchCanvasEditorHost(readFileSync(editorHostFile, 'utf8'))))
+    const processFile = join(stage, 'lib/managed-editor-process.js')
+    writeFileSync(processFile, patchCompilerEditorProcess(readFileSync(processFile, 'utf8')))
     for (const file of previewWorkerFiles) {
       const target = join(stage, previewSources, file)
       mkdirSync(dirname(target), { recursive: true })
@@ -119,6 +141,8 @@ function build(upstreamPath) {
       "import { attachCompilerPreviewRoute, COMPILER_PREVIEW_ROUTE } from './ui-compiler-preview-host.mjs';",
       "import { buildSavedCompilerPreview } from './ui-compiler-preview-build.mjs';",
       "import { attachCompilerExportRoute, COMPILER_EXPORT_ROUTE } from './export-host.mjs';",
+      "import { attachCompilerConfigRoute, attachCompilerAssetRoute, attachCompilerPenImportRoute, COMPILER_PEN_IMPORT_ROUTE, attachCompilerImageRoute, attachCompilerConversationsRoute, activeCompilerCanvas, COMPILER_CONFIG_ROUTE, COMPILER_ASSET_ROUTE, COMPILER_IMAGE_ROUTE, COMPILER_CONVERSATIONS_ROUTE } from './ui-compiler-host.mjs';",
+      "import { createCompilerDrawTools } from './draw-tools.mjs';",
       "import { mountCanvasAgent } from './agent-service.mjs';",
       "",
     ].join('\n')
@@ -141,6 +165,11 @@ function build(upstreamPath) {
       "            [COMPILER_CANVAS_ROUTE, attachCompilerCanvasRoute({ ...options, editorHost, controller })],",
       "            [COMPILER_PREVIEW_ROUTE, attachCompilerPreviewRoute({ ...options, buildCompilerPreview: (_root, snapshot) => buildProject(snapshot, false) })],",
       "            [COMPILER_EXPORT_ROUTE, attachCompilerExportRoute({ ...options, buildExport: (binding, snapshot) => buildProject({ ...snapshot, canvasFile: binding.canvasFile }, true) })],",
+      "            [COMPILER_CONFIG_ROUTE, attachCompilerConfigRoute(options)],",
+      "            [COMPILER_ASSET_ROUTE, attachCompilerAssetRoute(options)],",
+      "            [COMPILER_PEN_IMPORT_ROUTE, attachCompilerPenImportRoute({ ...options, editorHost })],",
+      "            [COMPILER_IMAGE_ROUTE, attachCompilerImageRoute({ ...options, editorHost })],",
+      "            [COMPILER_CONVERSATIONS_ROUTE, attachCompilerConversationsRoute(options)],",
       "        ]) scope.effect(() => scope.webServer.register({ kind: 'exact', path, handler }), 'ui-compiler: ' + path);",
       "    });",
       '',
@@ -148,6 +177,14 @@ function build(upstreamPath) {
     let host = readFileSync(join(stage, hostEntry), 'utf8')
     host = spliceOnce(host, "export { LEGACY_DESIGN_RENDER_TOOL_NAME", hostImport)
     host = spliceOnce(host, '    ctx.logger.info(`dsh-openpencil mounted (', registration)
+    host = spliceOnce(host, '    ctx.logger.info(`dsh-openpencil mounted (', [
+      "    ctx.inject(['tools'], toolCtx => {",
+      "        for (const tool of createCompilerDrawTools(editorHost, activeCompilerCanvas)) {",
+      "            toolCtx.effect(() => toolCtx.tools.register(tool), 'ui-compiler: ' + tool.name);",
+      "        }",
+      "    });",
+      '',
+    ].join('\n'))
     writeFileSync(join(stage, hostEntry), host)
 
     const sidebarAction = readFileSync(join(import.meta.dirname, 'client.js'), 'utf8').trimEnd()
@@ -161,6 +198,15 @@ function build(upstreamPath) {
     client = replaceOnce(client, 'style: panelStyles.toolbar,', [
       'className: workbenchTitle ? "uic-canvas-toolbar" : undefined,',
       '            style: workbenchTitle ? undefined : panelStyles.toolbar,',
+    ].join('\n'))
+    client = spliceOnce(client, '\t\t\trequestClose: async () => {', [
+      '            updateAgentWork: state => {',
+      '                if (!state || state.sessionId !== launchRef.current?.sessionId || !originRef.current) return;',
+      '                iframeRef.current?.contentWindow?.postMessage({...state, type: "uic/agent-work"}, originRef.current);',
+      '            },',
+      '            readVisualSelection: signal => readCompilerVisualSelection(',
+      '                iframeRef.current?.contentWindow, originRef.current, launchRef.current?.sessionId, signal),',
+      '',
     ].join('\n'))
     const originalTitle = '/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", {\n\t\t\t\t\tstyle: panelStyles.title,'
     client = replaceOnce(client, originalTitle, 'workbenchTitle ?? ' + originalTitle)
@@ -194,10 +240,11 @@ function build(upstreamPath) {
 
     manifest.version = overlayVersion
     manifest.dsh.client.inject = [...new Set([...manifest.dsh.client.inject, '@deepseek-ai/dsh-client-ui-sidebar', '@deepseek-ai/dsh-client-ui-layout', '@deepseek-ai/dsh-api-remotes', '@deepseek-ai/dsh-api-session-controller', '@deepseek-ai/dsh-api-workspace-controller'])]
-    manifest.peerDependencies['@deepseek-ai/dsh-typert-protocol'] = '0.2.2-alpha.2'
+    manifest.peerDependencies['@deepseek-ai/dsh-llm'] = '0.2.2-alpha.2 || 0.2.2-rc.5'
+    manifest.peerDependencies['@deepseek-ai/dsh-typert-protocol'] = '0.2.2-alpha.2 || 0.2.2-rc.5'
     writeFileSync(join(stage, 'package.json'), JSON.stringify(manifest, null, 2) + '\n')
 
-    const agentFiles = ['lib/agent-service.mjs', 'lib/agent-wire.mjs', 'lib/agent-host.mjs', 'lib/agent-selection.mjs', 'lib/agent-editor.mjs', 'lib/editor-host.js', 'lib/project-binding.mjs', 'lib/export-host.mjs']
+    const agentFiles = ['lib/agent-service.mjs', 'lib/agent-wire.mjs', 'lib/agent-host.mjs', 'lib/parallel-agent.mjs', 'lib/agent-selection.mjs', 'lib/agent-editor.mjs', 'lib/editor-host.js', 'lib/project-binding.mjs', 'lib/export-host.mjs', 'lib/asset-store.mjs', 'lib/draw-tools.mjs', 'lib/canvas-tools.mjs', 'lib/canvas-tool-loop.mjs', 'lib/task-plan.mjs', 'lib/conversations.mjs', 'lib/pen-document.mjs', 'lib/pen-context.mjs', 'lib/pen-import.mjs', 'lib/managed-editor-process.js', 'lib/selection-runtime.mjs', 'lib/selection-bridge.mjs', 'lib/font-bridge.mjs', 'lib/font-families.mjs', 'lib/font-faces.mjs', 'lib/font-weights.mjs']
     for (const file of [hostEntry, clientEntry, hostHelper, previewRoute, previewBuild, ...agentFiles]) {
       run(process.execPath, ['--check', join(stage, file)], stage)
     }
@@ -211,7 +258,8 @@ function build(upstreamPath) {
     const files = new Set(packed.files.map(file => file.path))
     for (const file of [hostEntry, clientEntry, hostHelper, previewRoute, previewBuild, ...agentFiles,
       ...previewWorkerFiles.map(file => join(previewSources, file)), previewVendor + '/vite/package.json',
-      'LICENSE', 'THIRD_PARTY_NOTICES.md', 'cordis.patch.yml', 'platforms.json']) {
+      previewVendor + '/rollup/dist/wasm-node/bindings_wasm_bg.wasm',
+      ...fontFiles.map(file => 'lib/fonts/' + file), 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'cordis.patch.yml', 'platforms.json']) {
       if (!files.has(file)) throw new Error(`Packaged overlay is missing ${file}`)
     }
     const artifactPath = join(output, artifactName)

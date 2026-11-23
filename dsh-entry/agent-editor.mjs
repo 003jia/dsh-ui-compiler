@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto'
 
+export const iconNames = ['sun','moon','bookmark','settings','search','check','link','arrow-right','chevron-down','chevron-right','x','plus',
+  'menu','heart','star','trash-2','copy','bell','home','user','folder','download','info','refresh-cw','palette']
+
 function fail(code) {
   return Object.assign(new Error(code), { code })
 }
@@ -25,8 +28,20 @@ export function patchCanvasEditorHost(source) {
             const baseUrl = new URL(session.iframeUrl).origin;
             const read = (signal = options.signal) => readManagedDaemonDocument(baseUrl, session.daemonToken, fetch, signal);
             const selection = () => this.#selectionFor(session, options.signal);
+            const replaceDocument = async (documentJson, version) => {
+                options.signal?.throwIfAborted();
+                if (sha256(await readSourceDocument(session.sourcePath)) !== session.baselineSha256) {
+                    throw Object.assign(new Error('Source changed'), {code: 'canvas_changed'});
+                }
+                session.mutating = true;
+                try {
+                    return await restoreManagedDaemonDocument(baseUrl, session.daemonToken, {documentJson, version});
+                } finally {
+                    session.mutating = false;
+                }
+            };
             const call = async (tool, args, signal = options.signal) => {
-                if (!['insert_node', 'replace_node', 'set_selection', 'snapshot_layout'].includes(tool)) throw new Error('Unsupported canvas operation');
+                if (!['insert_node', 'replace_node', 'set_selection', 'snapshot_layout', 'update_node'].includes(tool)) throw new Error('Unsupported canvas operation');
                 if (tool === 'insert_node' || tool === 'replace_node') {
                     if (sha256(await readSourceDocument(session.sourcePath)) !== session.baselineSha256) {
                         throw Object.assign(new Error('Source changed'), {code: 'canvas_changed'});
@@ -35,14 +50,14 @@ export function patchCanvasEditorHost(source) {
                 return callOpenPencilMcp({baseUrl, token: session.daemonToken, tool, arguments: args, signal});
             };
             session.createdAt = Date.now();
-            return operation({id: session.id, read, selection, call});
+            return operation({id: session.id, read, selection, call, replaceDocument});
         });
     }
 ` + anchor)
 }
 
-const types = new Set(['frame', 'text', 'rectangle', 'ellipse'])
-const typeAliases = { group: 'frame', container: 'frame', artboard: 'frame', rect: 'rectangle', circle: 'ellipse', label: 'text' }
+const types = new Set(['frame', 'text', 'rectangle', 'ellipse', 'image', 'icon_font'])
+const typeAliases = { group: 'frame', container: 'frame', artboard: 'frame', rect: 'rectangle', circle: 'ellipse', label: 'text', icon: 'icon_font' }
 const numeric = new Set(['gap', 'cornerRadius', 'fontSize', 'x', 'y'])
 const enumFields = {
   layout: ['vertical', 'horizontal', 'none'],
@@ -126,7 +141,7 @@ function cleanFrame(tree) {
     if (depth > 16 || ++count > 160) invalid(path, 'use at most 160 layers and 16 levels')
     const kind = keyword(raw.type)
     const type = own(typeAliases, kind) ?? kind
-    if (!types.has(type)) invalid(path + '.type', 'use frame, text, rectangle, or ellipse')
+    if (!types.has(type)) invalid(path + '.type', 'use frame, text, rectangle, ellipse, image or icon_font')
     const node = { type }
     const values = { ...raw }
     values.fill ??= type === 'text' ? raw.color ?? raw.textColor ?? raw.fills : raw.backgroundColor ?? raw.background ?? raw.fills
@@ -134,6 +149,13 @@ function cleanFrame(tree) {
     values.layout ??= raw.layoutMode ?? raw.flexDirection
     values.gap ??= raw.itemSpacing
     values.cornerRadius ??= raw.borderRadius
+    if (type === 'icon_font') {
+      const icon = raw.iconFontName ?? raw.icon
+      if (!iconNames.includes(icon)) invalid(path + '.iconFontName', 'choose a supported Lucide icon')
+      node.iconFontName = icon
+      node.iconFontFamily = 'lucide'
+      values.fill ??= raw.color
+    }
     if (type === 'text') values.content ??= raw.text ?? raw.characters
     for (const [key, value] of Object.entries(values)) {
       if (value == null) continue
@@ -165,6 +187,19 @@ function cleanFrame(tree) {
         node.padding = paddingAt(value, field)
       } else if (key === 'fill') {
         node.fill = solidFill(value, field)
+      } else if (key === 'stroke') {
+        const stroke = typeof value === 'string' ? { fill: value } : value
+        if (!stroke || typeof stroke !== 'object' || Array.isArray(stroke)) invalid(field, 'use a solid stroke with fill and thickness')
+        node.stroke = { fill: solidFill(stroke.fill ?? stroke.color, field + '.fill'),
+          thickness: numberAt(stroke.thickness ?? values.strokeWidth ?? 1, field + '.thickness', 0, 128) }
+      } else if (key === 'opacity') {
+        node.opacity = numberAt(value, field, 0, 1)
+      } else if (key === 'clipContent' && typeof value === 'boolean') {
+        node.clipContent = value
+      } else if (key === 'src') {
+        if (typeof value !== 'string' || value.length === 0 || value.length > 12_000_000) invalid(field, 'use an uploaded asset reference or a bounded image URL')
+        if (!/^(?:asset:[a-f0-9]{64}|data:image\/[a-z+.-]+;base64,|https:\/\/)/u.test(value)) invalid(field, 'use asset:<id>, a data:image URL, or https')
+        node.src = value
       } else if (key === 'children') {
         if (!Array.isArray(value) || (value.length && type !== 'frame')) invalid(field, 'only a frame may contain child layers')
         if (value.length) node.children = value.map((child, i) => visit(child, depth + 1, field + '[' + i + ']'))
@@ -177,7 +212,22 @@ function cleanFrame(tree) {
   if (!node.name?.trim()) invalid('frame.name', 'give the frame a descriptive name')
   if (!node.children?.length) invalid('frame.children', 'include the editable UI layers')
   if (!(node.width > 0 && node.height > 0)) invalid('frame.width/height', 'give the frame positive pixel dimensions')
+  if (JSON.stringify(node).includes('"type":"image"')) requireImageSources(node)
   return { node, count }
+}
+
+function requireImageSources(node) {
+  if (node.type === 'image' && typeof node.src !== 'string') invalid('frame', 'every image layer needs a src')
+  for (const child of node.children ?? []) requireImageSources(child)
+}
+
+function replaceAssetSources(node, resolveAsset) {
+  if (node.type === 'image' && node.src?.startsWith('asset:')) {
+    const resolved = resolveAsset?.(node.src.slice(6))
+    if (typeof resolved !== 'string') invalid('frame', 'the referenced upload is unavailable')
+    node.src = resolved
+  }
+  for (const child of node.children ?? []) replaceAssetSources(child, resolveAsset)
 }
 
 export function normalizeCanvasFrame(raw) {
@@ -256,18 +306,28 @@ async function placeNearSelection(live, page, selection, node) {
 }
 
 export async function readCanvasContext(editorHost, options) {
+  const { describeCanvasSelection } = await import('./pen-context.mjs')
   try {
     return await editorHost.withCompilerCanvas(options, async live => {
       const [selection, state] = await Promise.all([live.selection(), live.read()])
-      const page = currentPage(state, selection.activePageId)
+      const visual = options.visualSelection
+      if (visual && visual.sessionId !== live.id) throw fail('canvas_changed')
+      const activePageId = visual?.activePageId ?? selection.activePageId
+      const page = currentPage(state, activePageId)
+      const selectedIds = visual?.selectedIds ?? selection.selectedIds
       const prior = priorNode(page, options.previousFrame, live.id)
+      const structure = options.describePage?.(page.children, selectedIds)
+      const describe = node => /^pen_[a-f0-9]{64}_/u.test(node.id) && options.summarizeImported
+        ? options.summarizeImported(node) : summarize(node)
       return {
         sessionId: live.id,
-        activePageId: selection.activePageId,
+        activePageId,
+        boards: page.children.filter(n => n.type === 'frame').slice(0,48).map(n => ({id:n.id,name:String(n.name ?? '').slice(0,180)})),
         context: {
           pageName: page.name ?? '',
-          frames: page.children.slice(0, 32).map(summarize),
-          selection: selection.nodes.slice(0, 12).map(summarize),
+          frames: page.children.slice(0, 32).map(describe),
+          selection: describeCanvasSelection(page.children, selectedIds),
+          ...(structure ? { designStructure: structure } : {}),
           canRevise: Boolean(prior),
           // The receipt is bound to a tree previously made by this assistant.
           ...(prior ? { previousFrame: prior } : {}),
@@ -281,6 +341,7 @@ export async function readCanvasContext(editorHost, options) {
 
 export async function applyCanvasFrame(editorHost, frame, options) {
   const { node, count } = cleanFrame(frame)
+  replaceAssetSources(node, options.resolveAsset)
   const { snapshot, action, previousFrame } = options
   const revise = action === 'revise'
   if (!revise && action !== 'create') throw fail('invalid_design')
@@ -323,6 +384,241 @@ export async function applyCanvasFrame(editorHost, frame, options) {
     // Selection is optional: the design is already committed, so a focus
     // failure must never report failure and encourage a duplicate insertion.
     await live.call('set_selection', { node_id: result.id }, receiptSignal).catch(() => {})
-    return { id: result.id, name: result.name, nodeCount: count, fingerprint: fingerprint(result), sessionId: live.id }
+    return { id: result.id, name: result.name, nodeCount: count, fingerprint: fingerprint(result), sessionId: live.id,
+      x:result.x, y:result.y, targetIds:workTargetIds(result) }
+  })
+}
+
+/**
+ * Insert one caller-supplied node, such as an uploaded image, beside the
+ * current selection and leave it selected. The node stays unsaved until the
+ * user saves the canvas.
+ * @param editorHost - managed editor controller.
+ * @param node - clean OpenPencil node with numeric bounds.
+ * @param options - canvas binding, asset resolver and cancellation signal.
+ * @returns the inserted node identity and bounds.
+ */
+export async function insertCanvasNode(editorHost, node, options) {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) throw fail('invalid_design')
+  if (!types.has(node.type)) throw fail('invalid_design')
+  if (typeof node.name !== 'string' || node.name.trim() === '' || node.name.length > 240) throw fail('invalid_design')
+  for (const key of ['width', 'height']) {
+    if (!Number.isFinite(node[key]) || node[key] <= 0) throw fail('invalid_design')
+  }
+  for (const key of ['x', 'y']) {
+    if (node[key] !== undefined && !Number.isFinite(node[key])) throw fail('invalid_design')
+  }
+  if (node.type === 'image') {
+    if (typeof node.src !== 'string') throw fail('invalid_design')
+    node.src = replaceOneAsset(node.src, options.resolveAsset)
+  }
+  return editorHost.withCompilerCanvas(options, async live => {
+    const [selection, state] = await Promise.all([live.selection(), live.read()])
+    const pageId = selection.activePageId
+    const page = currentPage(state, pageId)
+    if (node.x === undefined || node.y === undefined) {
+      Object.assign(node, await placeNearSelection(live, page, selection, node))
+    }
+    const oldIds = new Set(page.children.map(child => child.id))
+    options.signal?.throwIfAborted()
+    await live.call('insert_node', { data: node, pageId }, AbortSignal.timeout(20000))
+    const next = currentPage(await live.read(AbortSignal.timeout(7000)), pageId)
+    const result = next.children.find(child => !oldIds.has(child.id) && child.name === node.name)
+    if (!result) throw fail('edit_failed')
+    await live.call('set_selection', { node_id: result.id }, AbortSignal.timeout(7000)).catch(() => {})
+    return {
+      id: result.id, name: result.name, type: result.type,
+      x: result.x, y: result.y, width: result.width, height: result.height,
+    }
+  })
+}
+
+function replaceOneAsset(source, resolveAsset) {
+  if (!source.startsWith('asset:')) return source
+  const resolved = resolveAsset?.(source.slice(6))
+  if (typeof resolved !== 'string') throw fail('invalid_design')
+  return resolved
+}
+
+// Work areas are placement hints, never real document nodes. Recheck the live
+// native bounds when a worker finishes because another writer may arrive first.
+export async function prepareAgentWorkAreas(editorHost, count, options) {
+  if (!Number.isInteger(count) || count < 1 || count > 6) throw fail('invalid_design')
+  const {snapshot} = options
+  return editorHost.withCompilerCanvas({...options, sessionId:snapshot.sessionId}, async live => {
+    const [selection, state] = await Promise.all([live.selection(), live.read()])
+    if (selection.activePageId !== snapshot.activePageId) throw fail('canvas_changed')
+    const page = currentPage(state, snapshot.activePageId)
+    let x = 0, y = 0
+    if (page.children.length) {
+      const boxes = await workBounds(live, snapshot.activePageId)
+      const ids = new Set(options.visualSelection?.selectedIds ?? selection.selectedIds)
+      const root = page.children.find(child => containsSelection(child, ids))
+      const anchor = boxes.find(box => box.id === root?.id) ?? boxes[0]
+      if (!anchor) throw fail('canvas_changed')
+      x = anchor.x
+      y = anchor.y + anchor.height + 48
+    }
+    return Array.from({length:count}, (_, i) => ({index:i+1, x:x+i*352, y}))
+  })
+}
+
+async function workBounds(live, pageId, extra = {}) {
+  const result = await live.call('snapshot_layout', {pageId, maxDepth:0, ...extra})
+  const boxes = result?.value?.layout
+  if (!Array.isArray(boxes)) throw fail('canvas_changed')
+  return boxes.filter(box => [box.x,box.y,box.width,box.height].every(Number.isFinite))
+}
+
+export async function resolveAgentWorkTarget(editorHost, targetId, options) {
+  if (!targetId || typeof targetId !== 'string') return null
+  const {snapshot} = options
+  return editorHost.withCompilerCanvas({...options, sessionId:snapshot.sessionId}, async live => {
+    const selection = await live.selection()
+    if (selection.activePageId !== snapshot.activePageId) return null
+    // The native parentId filter excludes the parent itself and resets its
+    // origin. A page-root snapshot retains absolute coordinates at every depth.
+    const boxes = await workBounds(live, snapshot.activePageId, {maxDepth:24})
+    const pending = boxes.map(box => ({box,enclosing:null}))
+    while (pending.length) {
+      const {box,enclosing} = pending.pop()
+      const large = Number.isFinite(box.width*box.height) && box.width*box.height >= 2000
+      if (box.id === targetId) return {x:box.x+box.width/2, y:box.y+box.height/2,
+        anchorId:large || !enclosing ? targetId : enclosing}
+      for (const child of box.children ?? []) pending.push({box:child,enclosing:large ? box.id : enclosing})
+    }
+    return null
+  })
+}
+
+function receiptForBoard(expectation, root, includeTargets) {
+  const {index, round, boardId, count} = expectation
+  const receipt = {index, round, boardId, count, name:root.name}
+  if (!includeTargets) return receipt
+  return {...receipt, x:root.x, y:root.y, targetIds:workTargetIds(root)}
+}
+
+function workTargetIds(root) {
+  // Expose a short, ordered path through real, committed layers. The native
+  // painter resolves scene geometry, so text, layout, pan and zoom stay aligned.
+  const targets = []
+  function visit(node) {
+    if (targets.length >= 12) return
+    targets.push(node.id)
+    for (const child of node.children ?? []) visit(child)
+  }
+  visit(root)
+  return targets
+}
+
+function freeWorkPosition(boxes, node, hint) {
+  const x = hint.x
+  let y = hint.y
+  // Travel down one column only as far as the existing content requires.
+  for (const box of [...boxes].sort((a,b) => a.y-b.y)) {
+    if (x < box.x + box.width + 32 && x + node.width + 32 > box.x &&
+        y < box.y + box.height + 32 && y + node.height + 32 > box.y) {
+      y = box.y + box.height + 32
+    }
+  }
+  return {x,y}
+}
+
+// A generated batch has one commit point. The daemon compares the version of
+// the exact snapshot being merged; IDs make a retry safe after a lost receipt.
+export async function applyParallelFrames(editorHost, designs, options) {
+  const { serializeDocument } = await import('./pen-import.mjs')
+  const { snapshot } = options
+  const prefix = 'uic_batch_' + createHash('sha256').update(options.batchKey).digest('hex') + '_'
+  const normalized = designs.map(({frame, index, round}) => {
+    const { node, count } = cleanFrame(frame)
+    replaceAssetSources(node, options.resolveAsset)
+    const boardId = prefix + index + '_v' + (round + 1)
+    let serial = 0
+    function identify(layer) {
+      layer.id = serial ? boardId + '_' + serial : boardId
+      serial++
+      for (const child of layer.children ?? []) identify(child)
+    }
+    identify(node)
+    const suffix = ' · A' + index + ' V' + (round + 1)
+    const baseName = node.name.replace(/(?:\s*·\s*A\d+\s+V\d+\s*)+$/iu, '').trim() || node.name
+    node.name = baseName.slice(0, 240 - suffix.length) + suffix
+    return {index, round, boardId, node, count}
+  })
+  return editorHost.withCompilerCanvas({ ...options, sessionId: snapshot.sessionId }, async live => {
+    const [selection, state] = await Promise.all([live.selection(), live.read()])
+    if (selection.activePageId !== snapshot.activePageId) throw fail('canvas_changed')
+    const doc = JSON.parse(state.documentJson)
+    const page = doc.pages?.length ? doc.pages.find(p => p.id === snapshot.activePageId) ??
+      (/^\d+$/u.test(snapshot.activePageId) ? doc.pages[Number(snapshot.activePageId)] : undefined) : doc
+    if (!Array.isArray(page?.children)) throw fail('canvas_changed')
+    function existingReceipt(children) {
+      const byId = new Map(children.map(n => [n.id, n]))
+      const roots = normalized.map(({boardId}) => byId.get(boardId))
+      if (!roots.some(Boolean)) return
+      if (!roots.every(Boolean)) throw fail('canvas_changed')
+      return normalized.map((expected, i) => receiptForBoard(expected, roots[i], options.incremental))
+    }
+    const retry = existingReceipt(page.children)
+    if (retry) return retry
+    const remaining = (doc.pages?.length ? doc.pages : [doc]).flatMap(p => p.children)
+    while (remaining.length) {
+      const item = remaining.pop()
+      if (options.incremental
+          ? normalized.some(({boardId}) => item.id === boardId || item.id?.startsWith(boardId + '_'))
+          : item.id?.startsWith(prefix)) throw fail('canvas_changed')
+      for (const child of item.children ?? []) remaining.push(child)
+    }
+    if (options.incremental) {
+      const boxes = page.children.length ? await workBounds(live, snapshot.activePageId) : []
+      for (const {index, round, node} of normalized) {
+        const workArea = options.workAreas?.find(area => area.index === index)
+        if (!workArea || ![workArea.x,workArea.y].every(Number.isFinite)) throw fail('canvas_changed')
+        Object.assign(node, freeWorkPosition(boxes, node, {x:workArea.x, y:workArea.y + round*288}))
+        boxes.push(node)
+        page.children.push(node)
+      }
+    } else {
+      const widths = [], heights = []
+      for (const {index, round, node} of normalized) {
+        widths[index - 1] = Math.max(widths[index - 1] ?? 0, node.width)
+        heights[round] = Math.max(heights[round] ?? 0, node.height)
+      }
+      const positions = sizes => {
+        let offset = 0
+        return sizes.map(size => {
+          const start = offset
+          offset += size + 48
+          return start
+        })
+      }
+      const xs = positions(widths), ys = positions(heights)
+      const size = { width: xs.at(-1) + widths.at(-1), height: ys.at(-1) + heights.at(-1) }
+      const anchor = options.visualSelection?.activePageId === snapshot.activePageId
+        ? {...selection, selectedIds: options.visualSelection.selectedIds} : selection
+      const origin = await placeNearSelection(live, page, anchor, size)
+      for (const {index, round, node} of normalized) {
+        node.x = origin.x + xs[index - 1]
+        node.y = origin.y + ys[round]
+        page.children.push(node)
+      }
+    }
+    options.signal.throwIfAborted()
+    let encoded
+    try { encoded = serializeDocument(doc) }
+    catch { invalid('batch', 'the combined canvas exceeds the native document size limit') }
+    let writeError
+    try { await live.replaceDocument(encoded, state.version) }
+    catch (error) { writeError = error }
+    const receiptSignal = AbortSignal.timeout(10000)
+    const next = currentPage(await live.read(receiptSignal), snapshot.activePageId)
+    const receipt = existingReceipt(next.children)
+    if (!receipt) {
+      if (/409|version conflict/iu.test(writeError?.message) || writeError?.code === 'canvas_changed') throw fail('canvas_changed')
+      throw fail('edit_failed')
+    }
+    if (!options.incremental) await live.call('set_selection', {node_id: receipt[0].boardId}, receiptSignal).catch(() => {})
+    return receipt
   })
 }

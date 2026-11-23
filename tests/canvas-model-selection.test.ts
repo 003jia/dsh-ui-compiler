@@ -21,7 +21,9 @@ const ctx = {
 
 test('the canvas protocol keeps existing calls and permits only complete route overrides', () => {
   assert.equal(descriptors[0].method, 'generate')
-  assert.equal(descriptors[0].parameters.length, 2)
+  assert.equal(descriptors[0].parameters.length, 3)
+  assert.equal(descriptors[0].parameters[2].wire, 'attachments')
+  assert.equal(descriptors[1].parameters[3].wire, 'attachments')
   for (const invalid of [null, [], { model: 'm' }, { provider: 'a' }, { provider: ' ' }, { reasoningEffort: 1 }, { apiKey: 'x' }]) {
     assert.throws(() => parser.parse(invalid), /Invalid canvas model selection/)
   }

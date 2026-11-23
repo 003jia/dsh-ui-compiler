@@ -24,6 +24,7 @@ export const previewWorkerFiles = Object.freeze([
   'src/ir/index.ts',
   'tokens/dsw.tokens.json',
   'tokens/primitives.inventory.json',
+  'tokens/preview-icons.json',
   'harness/index.html',
   'harness/vite.config.ts',
   'harness/src/fixtures.ts',
@@ -208,6 +209,7 @@ function frontendSource(root, compiled) {
   const frames = savedPreviewFrames(root, inputHash, compiled)
   if (!compiled && frames.length === 0) throw new Error('Save a visible frame before exporting.')
   const compiledBoardId = compiled ? JSON.parse(readFileSync(join(root, generatedDirectory, '.uic-manifest.json'), 'utf8')).frameIds[0] : undefined
+  const iconPaths = JSON.parse(readFileSync(join(root, 'tokens/preview-icons.json'), 'utf8'))
   const files = {
     'boards.json': JSON.stringify(frames, null, 2) + '\n',
     'CanvasFramePreview.tsx': readFileSync(join(root, 'harness/src/CanvasFramePreview.tsx'), 'utf8'),
@@ -217,6 +219,7 @@ function frontendSource(root, compiled) {
       ...(compiled ? ["import { McpCenterView, type McpCenterViewProps } from './McpCenterView.generated'"] : []),
       '',
       ...(compiled ? ["export const compiledBoardId = " + JSON.stringify(compiledBoardId)] : []),
+      'const iconPaths: Readonly<Record<string, string>> = ' + JSON.stringify(iconPaths),
       'export const boards: ReadonlyArray<{ id: string; name?: string }> = savedBoards',
       '',
       'export interface UiPageProps {',
@@ -228,7 +231,7 @@ function frontendSource(root, compiled) {
       '// Pass onAction to connect a design button to your service using its stable layer ID.',
       'export default function UiPage(props: UiPageProps) {',
       '  const board = props.boardId === undefined ? boards[boards.length - 1] : boards.find(item => item.id === props.boardId)',
-      '  if (board) return <CanvasFramePreview frame={board} onAction={props.onAction} />',
+      '  if (board) return <CanvasFramePreview frame={board} iconPaths={iconPaths} onAction={props.onAction} />',
       ...(compiled ? ['  if (props.boardId === undefined || props.boardId === compiledBoardId) return <McpCenterView {...props.mcpProps} />'] : []),
       '  return null',
       '}',

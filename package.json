@@ -13,6 +13,7 @@
     "@deepseek-ai/dsh-client-ui-theme": "0.2.2-alpha.2",
     "@open-pencil/cli": "0.16.0",
     "@open-pencil/mcp": "0.16.0",
+    "@rollup/wasm-node": "4.68.2",
     "@types/node": "24.8.0",
     "@types/pngjs": "6.0.5",
     "@types/react": "18.3.12",

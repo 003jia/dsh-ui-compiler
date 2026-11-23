@@ -2,6 +2,7 @@ import { constants } from 'node:fs'
 import { link, lstat, mkdir, open, realpath, unlink } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { isAbsolute, join } from 'node:path'
+import { readProjectConfig } from './asset-store.mjs'
 
 // Workspace identities are minted by DSH and looked up again on every request.
 // A caller never selects a path or supplies a project root.
@@ -28,9 +29,16 @@ export async function resolveProjectBinding(workspaceRegistry, workspaceId, lega
     throw new Error('Workspace root changed')
   }
   const legacy = workspaceRoot === legacyWorkspaceRoot
-  const canvasFile = legacy ? 'design/pages/mcp-center.op' : 'design/pages/ui.op'
+  const config = await readProjectConfig(workspaceRoot)
+  // A project that never chose a folder keeps the original sample filename in
+  // the compiler workspace; every other project saves into its configured
+  // design directory.
+  const canvasFile = legacy && !config.configured
+    ? 'design/pages/mcp-center.op'
+    : join(config.designDir, 'ui.op').split('\\').join('/')
   return {
     workspaceId, workspaceRoot, canvasFile, sourcePath: join(workspaceRoot, canvasFile),
+    assetDir: config.assetDir, designDir: config.designDir, config,
     historyFile: legacy ? 'mcp-center.history.json' : 'ui.history.json',
     ownerSessionId: 'uic-sidebar-' + workspaceId, projectTitle: project.title,
   }
@@ -55,8 +63,9 @@ export async function projectDirectory(workspaceRoot, segments, create) {
 // Publish a complete blank OpenPencil document only on a project's first
 // explicit open. A simultaneous opener or an existing file always wins.
 export async function ensureProjectCanvas(binding) {
-  if (binding.canvasFile !== 'design/pages/ui.op') return
-  const directory = await projectDirectory(binding.workspaceRoot, ['design', 'pages'], true)
+  if (!binding.canvasFile.endsWith('/ui.op')) return
+  const segments = binding.canvasFile.split('/').slice(0, -1)
+  const directory = await projectDirectory(binding.workspaceRoot, segments, true)
   try {
     const stat = await lstat(binding.sourcePath)
     if (!stat.isFile()) throw new Error('Invalid project design file')

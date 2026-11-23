@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import themeCss from 'virtual:dsh-harness-theme'
 import { CanvasFramePreview } from './CanvasFramePreview'
+import iconPaths from '../../tokens/preview-icons.json'
 import './preview.css'
 
 const options = new URLSearchParams(window.location.search)
@@ -57,7 +58,7 @@ export function BoardPreview({ children, inputHash, state = 'default' }: { child
           </select>
         </label>
       )}
-      {selected && <div className="preview-board-stage"><CanvasFramePreview frame={selected} /></div>}
+      {selected && <div className="preview-board-stage"><CanvasFramePreview frame={selected} iconPaths={iconPaths} /></div>}
       {children && <div className="preview-mcp-stage" hidden={Boolean(selected)}>{children}</div>}
       {!selected && !children && <p className="preview-no-boards" role="status">{locale === 'en' ? 'Save a frame on the canvas to preview it here.' : '在画布添加画板并保存后，就能在这里预览。'}</p>}
     </main>

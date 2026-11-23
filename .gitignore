@@ -1,6 +1,7 @@
 .DS_Store
 node_modules/
 .pnpm-store/
+.claude/
 artifacts/
 .dsh/
 .公用.md.lock
@@ -11,5 +12,7 @@ artifacts/
 harness/dist/
 harness/src/pages/mcp-center/
 tokens/*.json
+!tokens/preview-icons.json
 design/generated/
+design/assets/
 design/pages/*.op

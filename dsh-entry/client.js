@@ -1,12 +1,40 @@
+// Ask the currently mounted OpenPencil frame for its visual selection. Its
+// daemon can temporarily lose this information while replacing the document.
+function readCompilerVisualSelection(frame, origin, sessionId, signal) {
+  if (!frame || !origin || !sessionId || signal?.aborted) return Promise.resolve(null);
+  const requestId = crypto.randomUUID();
+  return new Promise(resolve => {
+    const finish = value => {
+      clearTimeout(timer);
+      window.removeEventListener("message", receive);
+      signal?.removeEventListener("abort", cancel);
+      resolve(value);
+    };
+    const receive = event => {
+      if (event.source !== frame || event.origin !== origin) return;
+      const data = event.data;
+      if (data?.type !== "uic/selection-result" || data.requestId !== requestId) return;
+      if (!Array.isArray(data.selectedIds)) return finish(null);
+      finish({ sessionId, activePageId: data.activePageId, selectedIds: data.selectedIds });
+    };
+    const cancel = () => finish(null);
+    const timer = setTimeout(cancel, 1600);
+    window.addEventListener("message", receive);
+    signal?.addEventListener("abort", cancel, { once: true });
+    try { frame.postMessage({ type: "uic/selection-request", requestId }, origin); }
+    catch { finish(null); }
+  });
+}
+
 /** Persistent compiler surfaces in the official DSH main panel. */
 function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent) {
   const {
     Button, IconChevronLeftOutlineRegular, IconCloseOutlineRegular, IconCodeOutlineRegular,
-    IconEditOutlineRegular, IconPlayOutlineRegular, Toast, Tooltip,
+    IconEditOutlineRegular, IconFolderOpenOutlineRegular, IconPlayOutlineRegular, Toast, Tooltip,
   } = require("@deepseek-ai/dsh-client-ui-primitives");
   const { IconPanelLeftOutlineRegular } = require("@deepseek-ai/dsh-client-ui-primitives");
   const { jsx, jsxs } = react_jsx_runtime;
-  const { useLayoutEffect, useRef, useState, useSyncExternalStore } = react;
+  const { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } = react;
   const namespace = "uic-sidebar-entry";
   const canvasId = "uic-canvas";
   const previewId = "uic-preview";
@@ -14,6 +42,11 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
   const disposed = new AbortController();
   const copy = {
     zh: {
+      importPen: "导入 .pen", importingPen: "正在导入…", penImages: "选择稿件配图",
+      penImageHint: "选择稿件引用的图片，配齐后会自动导入画板。", penImageMismatch: "请选择路径末尾同名的图片。",
+      invalid_pen: "无法解析此 .pen，请选择 Pencil 导出的设计文件。", penFailed: "导入失败，请检查稿件后重试。",
+      penAlready: "这份稿件已经在画布中。", penResult: (boards, layers) => `已导入 ${boards} 个画板，共 ${layers} 个图层。`,
+      penWarnings: "导入提示", pen_id_conflict: "导入稿件与已有图层的标识冲突。", too_large: "稿件或配图超过导入大小限制。", unsupported_image: "请选择 PNG、JPEG、WebP 或 GIF 图片。", penWrongPage: "画布内容已变化，请重新导入。",
       title: "UI 设计编译器",
       canvas: "设计画布",
       preview: "页面预览",
@@ -43,7 +76,11 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
       unsupported_effort: "所选思考深度已不可用，请重新选择。",
       model_failed: "当前 DSH 模型请求失败，请重试。",
       model_timeout: "模型响应超时，请重试。",
+      image_attachment_failed: "图片读取失败，请用「＋」重新添加 PNG、JPEG、WebP 或 GIF 图片后再发送。",
       invalid_request: "请输入 8000 字以内的设计需求。",
+      partial_base: "这次任务已写入部分改动。请核对工具记录，再发送剩余的修改要求。",
+      partial_followup: "本轮有追加要求未完成。请查看各条状态，已执行过的操作会保留。",
+      parallel_edit_targets: "原位编辑时，每位 Agent 需要一张已有画板。请按画板数量选择人数，使用分工协作，并关闭变体。",
       invalid_design: "模型返回的图层无法绘制，请重试或补充需求。",
       busyAgent: "上一条画布需求仍在处理中。",
       canvas_changed: "画布内容已变化，请核对后再发送。",
@@ -52,9 +89,18 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
       edit_failed: "写入图层失败，请核对当前画布后再试。",
       historyReadFailed: "画布已打开，暂时无法读取历史对话。",
       historyWriteFailed: "本次操作已完成，但对话未能保存。",
-      added: "已添加画板", revised: "已更新画板",
+      added: "已添加画板", revised: "已更新画板", dropFiles: "松开以放入画布",
+      targetFolder: "目标目录", designFolder: "设计稿目录", assetFolder: "上传资源目录",
+      folderHint: "相对项目根目录，例如 design/pages", save: "保存", cancel: "取消", folderLoading: "正在读取…",
+      folderSaved: "目标目录已保存。", folderPending: "目标目录已保存；保存或关闭当前画布后重新打开生效。", folderFailed: "目标目录保存失败，请检查路径。",
+      imageInserted: "图片已放入画布。", fileSaved: "文件已保存到项目资源目录。", uploadFailed: "上传失败，请重试。",
     },
     en: {
+      importPen: "Import .pen", importingPen: "Importing…", penImages: "Choose linked images",
+      penImageHint: "Choose the images referenced in this design to finish importing its boards.", penImageMismatch: "Choose the image with the indicated filename.",
+      invalid_pen: "Could not parse this .pen file. Choose a Pencil design document.", penFailed: "Could not import this design. Check the file and try again.",
+      penAlready: "This design is already in the canvas.", penResult: (boards, layers) => `Imported ${boards} boards with ${layers} layers in total.`,
+      penWarnings: "Import notes", pen_id_conflict: "This design conflicts with existing layer IDs.", too_large: "The design or its images exceed the import size limit.", unsupported_image: "Choose a PNG, JPEG, WebP or GIF image.", penWrongPage: "The canvas changed. Please import again.",
       title: "UI Design Compiler",
       canvas: "Design canvas",
       preview: "Page preview",
@@ -84,7 +130,11 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
       unsupported_effort: "The selected reasoning effort is unavailable. Choose another level.",
       model_failed: "The selected DSH model request failed. Try again.",
       model_timeout: "The model request timed out. Try again.",
+      image_attachment_failed: "The image could not be read. Use + to attach a PNG, JPEG, WebP or GIF, then send again.",
       invalid_request: "Enter a design request of up to 8,000 characters.",
+      partial_base: "This task applied some edits before it stopped. Review the tool history and send the remaining changes.",
+      partial_followup: "Some follow-ups did not finish. Check their individual statuses. Completed edits are preserved.",
+      parallel_edit_targets: "Each agent needs an existing board for in-place edits. Choose one agent per board, use collaboration, and turn variations off.",
       invalid_design: "The model returned an unusable design. Retry or refine the request.",
       busyAgent: "The previous canvas request is still running.",
       canvas_changed: "The canvas changed. Review it before retrying.",
@@ -93,7 +143,11 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
       edit_failed: "Could not apply the design. Review the canvas before retrying.",
       historyReadFailed: "The canvas is open, but its conversation could not be loaded.",
       historyWriteFailed: "The request completed, but the conversation could not be saved.",
-      added: "Added frame", revised: "Updated frame",
+      added: "Added frame", revised: "Updated frame", dropFiles: "Drop to place on the canvas",
+      targetFolder: "Target folder", designFolder: "Design folder", assetFolder: "Upload folder",
+      folderHint: "Relative to the project root, for example design/pages", save: "Save", cancel: "Cancel", folderLoading: "Loading…",
+      folderSaved: "Target folder saved.", folderPending: "Target folder saved. Save or close the current canvas, then reopen it.", folderFailed: "Could not save the target folder. Check the path.",
+      imageInserted: "Image placed on the canvas.", fileSaved: "File saved to the project assets.", uploadFailed: "Upload failed. Try again.",
     },
   };
   const listeners = new Set();
@@ -259,6 +313,30 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
       @container uic-title (max-width: 380px) {
         .uic-canvas-project, .uic-canvas-path-divider { display: none; }
       }
+      .uic-folder-panel {
+        position: absolute; z-index: 6; top: 56px; right: 16px; width: min(340px, calc(100% - 32px));
+        box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 14px;
+        border: 1px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-md);
+        background: var(--dsw-alias-bg-layer-2, Canvas); color: var(--dsw-alias-label-primary, CanvasText);
+        box-shadow: 0 8px 24px rgb(0 0 0 / 14%); font: var(--dsw-font-xs-13);
+      }
+      .uic-pen-resources { max-height: min(40vh, 260px); overflow: auto; display: grid; gap: 4px; overflow-wrap: anywhere; }
+      .uic-folder-field { display: flex; flex-direction: column; gap: 4px; }
+      .uic-folder-field > span { color: var(--dsw-alias-label-secondary, GrayText); font-size: 12px; }
+      .uic-folder-field input {
+        box-sizing: border-box; width: 100%; min-height: 32px; padding: 0 8px;
+        border: 1px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-sm);
+        background: var(--dsw-alias-bg-base, Canvas); color: inherit; font: inherit;
+      }
+      .uic-folder-hint { margin: 0; color: var(--dsw-alias-label-tertiary, GrayText); font-size: 12px; }
+      .uic-folder-error { margin: 0; color: var(--dsw-alias-state-error-primary, CanvasText); font-size: 12px; }
+      .uic-folder-actions { display: flex; justify-content: flex-end; gap: 8px; }
+      .uic-canvas-drop {
+        position: absolute; z-index: 7; inset: 0; display: flex; align-items: center; justify-content: center;
+        border: 2px dashed var(--dsw-focus-ring-color, Highlight); border-radius: var(--dsw-radius-md);
+        background: color-mix(in srgb, var(--dsw-alias-bg-base, Canvas) 82%, transparent);
+        color: var(--dsw-alias-label-primary, CanvasText); font: var(--dsw-font-xs-13); pointer-events: auto;
+      }
       .uic-preview-toolbar, .uic-preview-actions {
         display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
       }
@@ -313,7 +391,7 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
     return jsx("div", { className: "uic-main-anchor", "data-uic-panel": panelId, ref: anchorRef, "aria-hidden": true });
   }
 
-  function PersistentSurface({ panelId, state, label, workspaceId, ownerId, children }) {
+  function PersistentSurface({ panelId, state, label, workspaceId, ownerId, children, onDragOver, onDrop, dropActive, dropLabel }) {
     const element = useRef(null);
     const visible = state.panelId === panelId && state.bounds !== undefined && workspaceId === state.workspace?.workspaceId;
     useLayoutEffect(() => {
@@ -335,7 +413,11 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
       "data-openpencil-editor-workbench-owner": ownerId,
       tabIndex: -1,
       style: style ?? { inset: 0 },
-      children,
+      onDragOver,
+      onDrop,
+      children: dropActive ? [children, jsx("div", {
+        className: "uic-canvas-drop", "aria-hidden": true, children: dropLabel,
+      })] : children,
     });
   }
 
@@ -382,7 +464,8 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
       if (!isCurrent()) return;
       if (response.status === 404) return "missing";
       if (!response.ok) return "unavailable";
-      const { turns = [], historyUnavailable, workspaceId: responseId, ownerSessionId, projectTitle, ...envelope } = await response.json();
+      const { turns = [], historyUnavailable, conversationId, conversationTitle, conversations = [],
+        workspaceId: responseId, ownerSessionId, projectTitle, ...envelope } = await response.json();
       if (!isCurrent()) return;
       if (responseId !== workspaceId || ownerSessionId !== canvasSession) return "unavailable";
       const grant = presentationGrantOfMeta({ [PRESENTATION_META_KEY]: envelope });
@@ -392,7 +475,10 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
       const opened = workbench.isOpen(canvasSession) || await workbench.open({
         grant, workspaceId, isCurrent,
         sessionId: canvasSession,
-        surface: props => jsx(CompilerCanvasSurface, { ...props, workspaceId, projectTitle, project, turns, historyUnavailable }, workspaceId),
+        surface: props => jsx(CompilerCanvasSurface, {
+          ...props, workspaceId, projectTitle, project, turns, historyUnavailable,
+          conversationId, conversationTitle, conversations, reopenCanvas: openCanvas,
+        }, workspaceId),
       });
       if (!isCurrent()) return;
       if (!opened) return "busy";
@@ -400,6 +486,34 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
     } catch {
       if (isCurrent()) return "unavailable";
     }
+  }
+
+  async function uploadProjectFile(workspaceId, file) {
+    const response = await fetch(route + "/asset", {
+      method: "POST", credentials: "same-origin",
+      headers: {
+        "X-UIC-Workspace": workspaceId,
+        "X-UIC-Filename": encodeURIComponent(file.name),
+        "Content-Type": file.type || "application/octet-stream",
+      },
+      body: file,
+    })
+    if (!response.ok) {
+      const failure = await response.json().catch(() => ({}));
+      throw new Error(failure.error === "invalid_pen" ? "invalid_pen" : "uploadFailed");
+    }
+    const asset = await response.json()
+    return { id: asset.id, name: asset.name, mimeType: asset.mimeType, bytes: asset.bytes, path: asset.path }
+  }
+
+  async function insertUploadedImage(workspaceId, id) {
+    const response = await fetch(route + "/image", {
+      method: "POST", credentials: "same-origin",
+      headers: { "X-UIC-Workspace": workspaceId, "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    })
+    if (!response.ok) throw new Error("Image insertion failed")
+    return response.json()
   }
 
   function projectRequest(action, workspaceId, signal, timeout = 120000) {
@@ -487,31 +601,297 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
     });
   }
 
+  function CompilerFolderPanel({ labels, draft, error, onChange, onSave, onCancel }) {
+    return jsxs("div", {
+      className: "uic-folder-panel", role: "dialog", "aria-label": labels.targetFolder,
+      children: [
+        jsx("strong", { children: labels.targetFolder }),
+        draft === null ? jsx("p", { className: "uic-folder-hint", children: labels.folderLoading }) : jsxs(react_jsx_runtime.Fragment, {
+          children: [
+            jsxs("label", {
+              className: "uic-folder-field",
+              children: [
+                jsx("span", { children: labels.designFolder }),
+                jsx("input", {
+                  value: draft.designDir, spellCheck: false,
+                  onChange: event => onChange({ ...draft, designDir: event.target.value }),
+                }),
+              ],
+            }),
+            jsxs("label", {
+              className: "uic-folder-field",
+              children: [
+                jsx("span", { children: labels.assetFolder }),
+                jsx("input", {
+                  value: draft.assetDir, spellCheck: false,
+                  onChange: event => onChange({ ...draft, assetDir: event.target.value }),
+                }),
+              ],
+            }),
+            jsx("p", { className: "uic-folder-hint", children: labels.folderHint }),
+            error ? jsx("p", { className: "uic-folder-error", role: "alert", children: labels.folderFailed }) : null,
+          ],
+        }),
+        jsxs("div", {
+          className: "uic-folder-actions",
+          children: [
+            jsx(Button, { type: "button", variant: "ghost", size: "sm", onClick: onCancel, children: labels.cancel }),
+            jsx(Button, {
+              type: "button", variant: "primary", size: "sm", disabled: draft === null, onClick: onSave,
+              children: labels.save,
+            }),
+          ],
+        }),
+      ],
+    });
+  }
+
   function CompilerCanvasSurface({
     grant, colorScheme, locale, sessionId, ownerId, onLifecycleState, onLifecycleController, onClose, allowEditorTakeover,
-    workspaceId, projectTitle, project, turns, historyUnavailable,
+    workspaceId, projectTitle, project, turns, historyUnavailable, reopenCanvas,
+    conversationId: openedConversationId, conversationTitle, conversations: openedConversations = [],
   }) {
     const state = useSyncExternalStore(surfaces.subscribe, surfaces.getSnapshot, surfaces.getSnapshot);
     const labels = locale === "zh-CN" ? copy.zh : copy.en;
+    const lastRequest = useRef(null);
     const controller = useRef();
     const current = useRef(INITIAL_EDITOR_LIFECYCLE_STATE);
     const [closing, setClosing] = useState(false);
     const [lifecycle, setLifecycle] = useState(INITIAL_EDITOR_LIFECYCLE_STATE);
     const [closeError, setCloseError] = useState(false);
     const [historyNotice, setHistoryNotice] = useState(historyUnavailable ? "historyReadFailed" : null);
+    const [chat, setChat] = useState(() => ({
+      id: openedConversationId ?? null, title: conversationTitle ?? "",
+      turns, conversations: openedConversations,
+    }));
+    const [chatError, setChatError] = useState(false);
+    const [folderOpen, setFolderOpen] = useState(false);
+    const [folderDraft, setFolderDraft] = useState(null);
+    const [folderError, setFolderError] = useState(false);
+    const [dropActive, setDropActive] = useState(false);
+    const [dropNotice, setDropNotice] = useState(null);
+    const [penPending, setPenPending] = useState(null);
+    const [penBusy, setPenBusy] = useState(false);
+    const [penNotes, setPenNotes] = useState([]);
+    const penLock = useRef(false);
+    const penPicker = useRef(null);
+    const imagePicker = useRef(null);
+    const imagePath = useRef(null);
+
+    async function importPen(file, imageFile, path) {
+      if (penLock.current || selectedWorkspace()?.workspaceId !== workspaceId) return;
+      if (imageFile && (!penPending || imageFile.name !== path?.split("/").pop())) {
+        setDropNotice(labels.penImageMismatch);
+        return;
+      }
+      const signal = workspaceLifetime.signal;
+      penLock.current = true;
+      setPenBusy(true);
+      setDropNotice(null);
+      setPenNotes([]);
+      try {
+        let design = penPending;
+        if (file) {
+          const { id, name } = await uploadProjectFile(workspaceId, file);
+          design = { id, name, resources: [] };
+        } else if (imageFile) {
+          const image = await uploadProjectFile(workspaceId, imageFile);
+          design = { ...design, resources: [...design.resources.filter(item => item.path !== path), { path, id: image.id }] };
+        } else return;
+        const response = await fetch(route + "/import-pen", {
+          method: "POST", credentials: "same-origin", signal,
+          headers: { "X-UIC-Workspace": workspaceId, "Content-Type": "application/json" },
+          body: JSON.stringify({ id: design.id, resources: design.resources }),
+        });
+        const result = await response.json();
+        if (signal.aborted) return;
+        if (response.status === 422 && result.error === "pen_resources_required" && result.missing?.length) {
+          setPenPending({ ...design, missing: result.missing });
+          return true;
+        }
+        if (!response.ok) throw new Error(result.error);
+        setPenPending(null);
+        setDropNotice(result.alreadyImported ? labels.penAlready : labels.penResult(result.boardCount, result.layerCount));
+        setPenNotes(Array.isArray(result.warnings) ? result.warnings.filter(n => typeof n === "string") : []);
+      } catch (error) {
+        if (!signal.aborted) setDropNotice(error.message === "canvas_changed" ? labels.penWrongPage :
+          typeof labels[error.message] === "string" ? labels[error.message] : labels.penFailed);
+      } finally {
+        penLock.current = false;
+        setPenBusy(false);
+      }
+    }
+
+    useEffect(() => {
+      if (!folderOpen || folderDraft !== null) return;
+      const request = new AbortController();
+      fetch(route + "/config", {
+        method: "GET", credentials: "same-origin", headers: { "X-UIC-Workspace": workspaceId }, signal: request.signal,
+      }).then(response => response.ok ? response.json() : Promise.reject())
+        .then(config => setFolderDraft({ designDir: config.designDir, assetDir: config.assetDir }))
+        .catch(() => { if (!request.signal.aborted) { setFolderDraft({ designDir: "design/pages", assetDir: "design/assets" }); setFolderError(true) } });
+      return () => { request.abort() };
+    }, [folderOpen, folderDraft, workspaceId]);
+
+    async function switchConversation(action, id) {
+      try {
+        const response = await fetch(route + "/conversations", {
+          method: "POST", credentials: "same-origin",
+          headers: { "X-UIC-Workspace": workspaceId, "Content-Type": "application/json" },
+          body: JSON.stringify(action === "new" ? { action: "new" } : { action: "select", id }),
+        });
+        if (!response.ok) throw new Error("conversation");
+        const data = await response.json();
+        if (data?.conversation?.id === undefined) throw new Error("conversation");
+        project.draft = "";
+        setChatError(false);
+        setChat({
+          id: data.conversation.id, title: data.conversation.title ?? "",
+          turns: Array.isArray(data.conversation.turns) ? data.conversation.turns : [],
+          conversations: Array.isArray(data.conversations) ? data.conversations : [],
+        });
+      } catch {
+        setChatError(true);
+      }
+    }
+
+    async function saveFolder() {
+      if (folderDraft === null) return;
+      try {
+        const response = await fetch(route + "/config", {
+          method: "POST", credentials: "same-origin",
+          headers: { "X-UIC-Workspace": workspaceId, "Content-Type": "application/json" },
+          body: JSON.stringify(folderDraft),
+        });
+        if (!response.ok) throw new Error("config");
+        const config = await response.json();
+        const changed = typeof project.sourcePath !== "string" || !project.sourcePath.endsWith("/" + config.designDir + "/ui.op");
+        setFolderOpen(false);
+        setFolderDraft(null);
+        if (changed && ctx.layout.panelInfo.getSnapshot().activePanelId === canvasId) {
+          const closed = await closeCanvas();
+          if (closed) setTimeout(() => { void reopenCanvas() }, 0);
+          else setDropNotice(labels.folderPending);
+        } else {
+          setDropNotice(labels.folderSaved);
+        }
+      } catch {
+        setFolderError(true);
+      }
+    }
+
+    async function handleCanvasDrop(event) {
+      event.preventDefault();
+      setDropActive(false);
+      const files = [...(event.dataTransfer?.files ?? [])];
+      if (files.length === 0) return;
+      let waitingForResources = !!penPending;
+      for (const file of files) {
+        if (/\.pen$/i.test(file.name)) {
+          if (!waitingForResources) waitingForResources = await importPen(file);
+          continue;
+        }
+        try {
+          const asset = await uploadProjectFile(workspaceId, file);
+          if ((file.type || "").startsWith("image/") && asset.mimeType.startsWith("image/")) {
+            await insertUploadedImage(workspaceId, asset.id);
+            setDropNotice(labels.imageInserted);
+          } else {
+            setDropNotice(labels.fileSaved);
+          }
+        } catch {
+          setDropNotice(labels.uploadFailed);
+        }
+      }
+    }
+
+    useEffect(() => {
+      const dragenter = event => {
+        if (![...(event.dataTransfer?.types ?? [])].includes("Files")) return;
+        if (state.panelId !== canvasId || state.workspace?.workspaceId !== workspaceId) return;
+        setDropActive(true);
+      };
+      const dragover = event => {
+        if (state.panelId !== canvasId || state.workspace?.workspaceId !== workspaceId) return;
+        if ([...(event.dataTransfer?.types ?? [])].includes("Files")) event.preventDefault();
+      };
+      window.addEventListener("dragenter", dragenter);
+      window.addEventListener("dragover", dragover);
+      return () => {
+        window.removeEventListener("dragenter", dragenter);
+        window.removeEventListener("dragover", dragover);
+      };
+    }, [state.panelId, state.workspace?.workspaceId, workspaceId]);
 
     function formatReply({ reply, change }) {
       const receipt = change ? (change.revised ? labels.revised : labels.added) + " · " + change.name : "";
       return [reply, receipt].filter(Boolean).join("\n\n");
     }
 
-    async function generate({ prompt, selection, signal }) {
+    async function generate({ prompt, selection, attachments = [], signal, plan, onStatus, onProgress, onReady, runLabels }) {
       if (selectedWorkspace()?.workspaceId !== workspaceId) throw new Error(labels.projectRequired);
       const agent = getCanvasAgent();
       if (!agent) throw new Error(labels.agentOffline);
-      const result = selection.model || selection.reasoningEffort
-        ? await agent.generateWithOptions(workspaceId, prompt, selection, signal)
-        : await agent.generate(workspaceId, prompt, signal);
+      const visual = await controller.current?.readVisualSelection?.(signal);
+      signal?.throwIfAborted();
+      if (selectedWorkspace()?.workspaceId !== workspaceId) throw new Error(labels.canvas_changed);
+      const target = visual ? [visual.sessionId, visual.activePageId, [...visual.selectedIds].sort()] : [sessionId, null];
+      const key = JSON.stringify([chat.id, target, prompt, selection, attachments.map(a => a.id), plan ?? null]);
+      if (lastRequest.current?.key !== key) lastRequest.current = { key, requestId: crypto.randomUUID() };
+      const requestId = lastRequest.current.requestId;
+      onReady?.(async (additionId, text) => {
+        signal.throwIfAborted();
+        if (selectedWorkspace()?.workspaceId !== workspaceId) throw new Error(labels.canvas_changed);
+        const response = await agent.appendInstruction(workspaceId, requestId, additionId, text, signal);
+        if (!response.ok) throw new Error(labels.agentOffline);
+        if (!response.value?.ok) throw Object.assign(new Error(response.value?.error || "closed"), { code: response.value?.error || "closed" });
+        return response.value.status;
+      });
+      const poll = new AbortController();
+      const progressSignal = AbortSignal.any([signal, poll.signal]);
+      let timer, latest, fingerprint;
+      async function refresh() {
+        if (progressSignal.aborted) return;
+        try {
+          const response = await agent.parallelProgress(workspaceId, requestId, progressSignal);
+          const state = response.ok && response.value;
+          if (state?.phase && !progressSignal.aborted) {
+            const next = JSON.stringify({ ...state, elapsedMs: undefined });
+            if (fingerprint !== next) {
+              fingerprint = next;
+              latest = state;
+              onProgress?.(state);
+              const status = state.phase === "planning" ? runLabels.planning : state.phase === "writing" ? runLabels.writing
+                : state.phase === "followup" ? runLabels.followup
+                : plan && state.phase === "generating" ? runLabels.running(state.completed, state.total)
+                : state.slots?.some(slot => slot.activeTool?.name === "uic_canvas_read") ? runLabels.reading
+                : state.slots?.some(slot => slot.activeTool?.name === "uic_canvas_edit") ? runLabels.editing
+                : state.phase === "generating" ? runLabels.generating : null;
+              if (status) onStatus(status);
+            }
+            // The iframe expires stale pointers. Keep an active run present during long model steps.
+            if (Array.isArray(state.slots)) controller.current?.updateAgentWork?.({
+              requestId, sessionId: state.sessionId, pageId: state.pageId, slots: state.slots,
+            });
+          }
+        } catch { /* A later snapshot includes every completed tool receipt. */ }
+        if (!progressSignal.aborted) timer = setTimeout(refresh, 350);
+      }
+      timer = setTimeout(refresh, 180);
+      let result;
+      try {
+        result = plan
+          ? await agent.generateParallel(workspaceId, prompt, selection, attachments, visual ?? null, { ...plan, requestId }, signal)
+          : await agent.generateWithTools(workspaceId, prompt, selection, attachments, visual ?? null, requestId, signal);
+      } finally {
+        poll.abort();
+        clearTimeout(timer);
+        const finished = result?.ok && !result.value?.error && !signal.aborted;
+        const last = (finished && result.value?.plan) || latest;
+        const anchor = { requestId, sessionId: last?.sessionId || sessionId, pageId: last?.pageId ?? null };
+        if (finished && last?.slots?.length) controller.current?.updateAgentWork?.({ ...anchor, slots: last.slots });
+        controller.current?.updateAgentWork?.({ ...anchor, slots: [], ...(finished ? { finished: true } : {}) });
+      }
       if (!result.ok) throw new Error(labels.agentOffline);
       const data = result.value;
       if (data?.error) {
@@ -519,27 +899,31 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
           publish({ modelCatalogVersion: (surface.modelCatalogVersion || 0) + 1 });
         }
         const label = data.error === "busy" ? "busyAgent" : data.error;
-        throw new Error([labels[label] || labels.agentOffline, data.diagnostic].filter(Boolean).join(" · "));
+        const message = [labels[label] || labels.agentOffline, data.diagnostic].filter(Boolean).join(" · ");
+        throw Object.assign(new Error(message), { toolCalls: data.toolCalls, plan: data.plan || latest });
       }
       if (!data?.reply) throw new Error(labels.agentOffline);
+      if (lastRequest.current?.requestId === requestId) lastRequest.current = null;
       if (data.historySaved === false) setHistoryNotice("historyWriteFailed");
-      return { message: formatReply(data) };
+      return { message: formatReply(data), toolCalls: data.toolCalls, plan: data.plan || latest };
     }
 
     async function closeCanvas() {
-      if (closing || current.current.phase === "saving") return;
-      if (!confirmEditorClose(current.current.dirty, () => window.confirm(editorModalCopy(locale).discard))) return;
+      if (closing || current.current.phase === "saving") return false;
+      if (!confirmEditorClose(current.current.dirty, () => window.confirm(editorModalCopy(locale).discard))) return false;
       setClosing(true);
       setCloseError(false);
       try {
         if (controller.current && !await controller.current.requestClose()) {
           setCloseError(true);
-          return;
+          return false;
         }
         onClose();
         if (ctx.layout.panelInfo.getSnapshot().activePanelId === canvasId && selectedWorkspace()?.workspaceId === workspaceId) showChat();
+        return true;
       } catch {
         setCloseError(true);
+        return false;
       } finally {
         setClosing(false);
       }
@@ -554,6 +938,12 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
       state,
       label: labels.canvas,
       ownerId,
+      onDragOver: event => {
+        if ([...(event.dataTransfer?.types ?? [])].includes("Files")) event.preventDefault();
+      },
+      onDrop: handleCanvasDrop,
+      dropActive,
+      dropLabel: labels.dropFiles,
       children: [jsx(ManagedOpenPencilEditor, {
         grant,
         colorScheme,
@@ -589,6 +979,15 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
         workbenchActions: jsxs("div", {
           className: "uic-canvas-actions",
           children: [
+            jsx(CanvasTitleAction, {
+              icon: IconEditOutlineRegular, label: penBusy ? labels.importingPen : labels.importPen,
+              disabled: penBusy || !!penPending || lifecycle.phase !== "ready",
+              onClick: () => { setFolderOpen(false); penPicker.current?.click(); },
+            }),
+            jsx(CanvasTitleAction, {
+              disabled: penBusy || !!penPending, icon: IconFolderOpenOutlineRegular, label: labels.targetFolder,
+              onClick: () => { setFolderError(false); setFolderDraft(null); setFolderOpen(open => !open); },
+            }),
             jsx(CanvasTitleAction, { icon: IconPlayOutlineRegular, label: labels.preview, onClick: showPreview }),
             jsx(CanvasTitleAction, { icon: IconChevronLeftOutlineRegular, label: labels.chat, onClick: showChat }),
             jsx(CanvasTitleAction, {
@@ -598,13 +997,47 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
             closeError ? jsx(Toast, { text: labels.closeFailed, onDone: () => setCloseError(false) }) : null,
           ],
         }),
-      }, editorWorkbenchEditorKey(grant, sessionId)), jsx(CanvasAgentComposer, {
+      }, editorWorkbenchEditorKey(grant, sessionId)), folderOpen ? jsx(CompilerFolderPanel, {
+        labels, draft: folderDraft, error: folderError,
+        onChange: setFolderDraft,
+        onSave: saveFolder,
+        onCancel: () => { setFolderOpen(false); setFolderDraft(null); },
+      }) : null, jsx("input", {
+        type: "file", accept: ".pen", hidden: true, ref: penPicker,
+        onChange: event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importPen(file); },
+      }), jsx("input", {
+        type: "file", accept: "image/png,image/jpeg,image/webp,image/gif", hidden: true, ref: imagePicker,
+        onChange: event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importPen(null, file, imagePath.current); },
+      }), penPending ? jsxs("section", {
+        className: "uic-folder-panel", role: "dialog", "aria-label": labels.penImages,
+        children: [
+          jsx("strong", { children: labels.penImages }), jsx("span", { children: penPending.name }),
+          jsx("p", { className: "uic-folder-hint", children: labels.penImageHint }),
+          jsx("div", { className: "uic-pen-resources", children: penPending.missing.map(path => jsx(Button, {
+            type: "button", size: "sm", disabled: penBusy, children: path,
+            onClick: () => { imagePath.current = path; imagePicker.current?.click(); },
+          }, path)) }),
+          jsx(Button, { type: "button", size: "sm", variant: "ghost", disabled: penBusy, onClick: () => setPenPending(null), children: labels.cancel }),
+        ],
+      }) : penNotes.length ? jsxs("aside", { className: "uic-folder-panel", children: [
+        jsx("strong", { children: labels.penWarnings }),
+        jsx("ul", { className: "uic-pen-resources", children: penNotes.map((note, i) => jsx("li", { children: note }, i)) }),
+        jsx(Button, { type: "button", size: "sm", variant: "ghost", onClick: () => setPenNotes([]), children: locale === "zh-CN" ? "知道了" : "Dismiss" }),
+      ] }) : null, jsx(CanvasAgentComposer, {
         locale, disabled: closing || lifecycle.phase !== "ready", onGenerate: generate,
-        initialTurns: turns, formatReply, project, workspaceId,
+        initialTurns: chat.turns, formatReply, project, workspaceId,
         active: state.panelId === canvasId && state.workspace?.workspaceId === workspaceId,
         loadModels: loadCanvasModels, catalogVersion: state.modelCatalogVersion,
-      }, workspaceId), historyNotice ? jsx(Toast, {
+        uploadFile: file => uploadProjectFile(workspaceId, file),
+        conversationId: chat.id, conversations: chat.conversations,
+        onNewConversation: () => switchConversation("new"),
+        onSelectConversation: id => switchConversation("select", id),
+      }, chat.id), chatError ? jsx(Toast, {
+        text: labels.conversationFailed, onDone: () => setChatError(false),
+      }) : null, historyNotice ? jsx(Toast, {
         text: labels[historyNotice], onDone: () => setHistoryNotice(null),
+      }) : null, dropNotice ? jsx(Toast, {
+        text: dropNotice, onDone: () => setDropNotice(null),
       }) : null],
     });
   }

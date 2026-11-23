@@ -35,3 +35,22 @@ export async function resolveCanvasSelection({ llm, agentDefaultModel }, overrid
     return { error: 'model_unavailable' }
   }
 }
+
+export async function resolveParallelModels(ctx, plan, main, signal) {
+  const shared = main ?? ctx.agentDefaultModel.currentSelection()
+  const unique = new Map()
+  return Promise.all(Array.from({length:plan.count}, async (_, i) => {
+    const override = plan.models?.[i]
+    if (!override) return shared
+    const key = JSON.stringify([override.provider, override.model])
+    if (!unique.has(key)) {
+      unique.set(key, (async () => {
+        let result = await resolveCanvasSelection(ctx, { ...override, ...(shared?.reasoningEffort ? {reasoningEffort: shared.reasoningEffort} : {}) }, signal)
+        if (result.error === 'unsupported_effort') result = await resolveCanvasSelection(ctx, override, signal)
+        if (result.error) throw Object.assign(new Error(result.error), {code: result.error})
+        return result.modelSelection
+      })())
+    }
+    return unique.get(key)
+  }))
+}

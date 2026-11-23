@@ -35,14 +35,7 @@ const own = <T>(record: Record<string, T>, key: string) => Object.hasOwn(record,
 const emptyShape = (): DataShape => ({ fields: new Set(), lists: new Map(), objects: new Map() })
 const decimal = /^-?(?:\d+\.?\d*|\.\d+)$/
 const validProp = /^[A-Za-z][A-Za-z0-9-]*$/
-const previewIconPaths: Record<string, string> = {
-  'chevron-down': 'M5 9l7 7 7-7',
-  'chevron-right': 'm9 5 7 7-7 7',
-  copy: 'M8 8h12v13H8z M16 8V3H3v13h5',
-  loader: 'M12 3a9 9 0 1 1-9 9',
-  inbox: 'M3 15l4-10h10l4 10v5H3z M3 15h5l2 3h4l2-3h5',
-  'circle-alert': 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z M12 7v6 M12 16v.2',
-}
+const previewIconPaths = readCatalog<Record<string, string>>('preview-icons.json')
 
 function readCatalog<T>(filename: string): T {
   return JSON.parse(readFileSync(new URL(`../../../tokens/${filename}`, import.meta.url), 'utf8')) as T

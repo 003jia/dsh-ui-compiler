@@ -102,6 +102,19 @@ test('normalizes common design values and pinpoints invalid nested fields before
   })
 })
 
+test('complete designs retain real icon layers and borders across normalization and revision', () => {
+  const source = { type: 'frame', name: '设置', width: 180, height: 56,
+    stroke: { fill: '#eee', thickness: 1 }, opacity: 0.95, clipContent: true,
+    children: [{ name: '外观图标', type: 'icon', icon: 'palette', color: '#667788', width: 18, height: 18 }] }
+  const frame = normalizeCanvasFrame(source)
+  assert.equal(frame.children[0].type, 'icon_font')
+  assert.equal(frame.children[0].iconFontFamily, 'lucide')
+  assert.equal(frame.children[0].iconFontName, 'palette')
+  assert.deepEqual(frame.stroke, { fill: [{ type: 'solid', color: '#eeeeee' }], thickness: 1 })
+  assert.deepEqual(normalizeCanvasFrame(frame), frame)
+  assert.throws(() => normalizeCanvasFrame({ ...source, children: [{ type: 'icon', icon: 'invalid-name' }] }), { code: 'invalid_design' })
+})
+
 test('the canvas model and effort reach every generation attempt; implicit depth keeps provider defaults', async () => {
   const { generateCanvasDesign } = await import(new URL('../dsh-entry/agent-host.mjs', import.meta.url).href)
   type Route = { provider: string; model: string; reasoningEffort?: string }
@@ -128,4 +141,37 @@ test('the canvas model and effort reach every generation attempt; implicit depth
   await generateCanvasDesign(input)
   assert.deepEqual(dispatched.slice(2), [adaptive, defaultRoute])
   assert.equal(defaultReads, 1)
+})
+
+test('Agent selection follows live IDs on the active page, including nested text after save', async () => {
+  const brand = { id: 'brand', type: 'text', name: 'Product name', content: 'Before save' }
+  const subtitle = { id: 'subtitle', type: 'text', name: 'Subtitle', content: [{ text: 'Status ' }, { text: 'ready' }] }
+  const board = { id: 'frame', type: 'frame', name: 'Board', children: [brand, subtitle] }
+  const doc = { pages: [
+    { id: 'inactive', children: [{ id: 'other', type: 'text', name: 'Other page', content: 'Other project text' }] },
+    { id: 'active', children: [board] },
+  ] }
+  let selectedIds = ['subtitle', 'brand', 'other']
+  // get_selection can provide only IDs; its optional node summaries omit text.
+  const selection = { activePageId: 'active', get selectedIds() { return selectedIds }, nodes: [{ id: 'brand', name: 'Stale name' }] }
+  const live = {
+    id: 'session', selection: async () => selection,
+    read: async () => ({ documentJson: JSON.stringify(doc) }),
+  }
+  const host = { withCompilerCanvas: (_: unknown, work: (editor: typeof live) => unknown) => work(live) }
+  brand.name = '产品名'
+  brand.content = 'SmartFav'
+  const read = async (options = {}) => (await readCanvasContext(host, options)).context.selection
+  assert.deepEqual((await read()).map((node: { name: string; text: string }) => [node.name, node.text]),
+    [['Subtitle', 'Status ready'], ['产品名', 'SmartFav']])
+  selectedIds = []
+  assert.deepEqual(await read(), [])
+  const visualSelection = { sessionId: live.id, activePageId: 'active', selectedIds: ['brand'] }
+  const visualResult = await read({ visualSelection })
+  assert.equal(visualResult[0].text, 'SmartFav')
+  await assert.rejects(read({ visualSelection: { ...visualSelection, sessionId: 'closed-editor' } }), { code: 'canvas_changed' })
+  selectedIds = ['brand']
+  assert.deepEqual(await read({ visualSelection: { ...visualSelection, selectedIds: [] } }), [])
+  doc.pages[1].children = []
+  assert.deepEqual(await read(), [])
 })

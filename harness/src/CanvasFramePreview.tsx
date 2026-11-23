@@ -47,14 +47,14 @@ function flexAlignment(value: unknown) {
     : 'flex-start'
 }
 
-function renderLayer(node: Layer, key: string | number, onAction?: CanvasAction, parentLayout?: Layout, insideButton = false): ReactNode {
+function renderLayer(node: Layer, key: string | number, iconPaths: Readonly<Record<string, string>>, onAction?: CanvasAction, parentLayout?: Layout, insideButton = false): ReactNode {
   const { type, name, content } = node
   if (node.visible === false || node.enabled === false || node.hidden === true) return null
 
   const grow = (parentLayout === 'vertical' && node.height === 'fill_container') ||
     (parentLayout === 'horizontal' && node.width === 'fill_container')
   const base: CSSProperties = {
-    boxSizing: 'border-box',
+    boxSizing: 'border-box', opacity: number(node.opacity),
     position: parentLayout === 'none' ? 'absolute' : 'relative',
     left: parentLayout === 'none' ? number(node.x) ?? 0 : undefined,
     top: parentLayout === 'none' ? number(node.y) ?? 0 : undefined,
@@ -82,8 +82,21 @@ function renderLayer(node: Layer, key: string | number, onAction?: CanvasAction,
     borderRadius: type === 'ellipse' ? '50%' : pixels(node.cornerRadius),
     overflow: node.clipContent === true ? 'hidden' : undefined,
   }
+  if (isLayer(node.stroke)) {
+    const ink = color(node.stroke.fill)
+    const width = number(node.stroke.thickness)
+    if (ink && width !== undefined && width > 0) style.boxShadow = `inset 0 0 0 ${width}px ${ink}`
+  }
   if (type === 'rectangle' || type === 'ellipse') {
     return <span key={key} aria-hidden="true" style={style} />
+  }
+  if (type === 'icon_font') {
+    const icon = node.iconFontName
+    if (typeof icon !== 'string' || !Object.hasOwn(iconPaths, icon)) return null
+    return <svg key={key} aria-hidden="true" style={{ ...base, display: 'block', color: color(node.fill) }}
+      viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <path d={iconPaths[icon]} />
+    </svg>
   }
   if (type === 'text_input') {
     return <input key={key} style={style} data-layer-id={String(node.id ?? key)}
@@ -110,7 +123,7 @@ function renderLayer(node: Layer, key: string | number, onAction?: CanvasAction,
   const button = !insideButton && typeof name === 'string' &&
     /(?:按钮$|button$|^(?:button|按钮)[/：:])/i.test(name.trim())
   const children = Array.isArray(node.children) && node.children.map((child, index) => isLayer(child)
-    ? renderLayer(child, typeof child.id === 'string' ? child.id : index, onAction, layout, insideButton || button)
+    ? renderLayer(child, typeof child.id === 'string' ? child.id : index, iconPaths, onAction, layout, insideButton || button)
     : null)
   if (button) {
     const id = String(node.id ?? key)
@@ -124,9 +137,11 @@ function renderLayer(node: Layer, key: string | number, onAction?: CanvasAction,
 }
 
 /** Renders the saved OpenPencil frame at its design size, independent of its position on the canvas. */
-export function CanvasFramePreview({ frame, onAction }: { frame: unknown; onAction?: CanvasAction }) {
+export function CanvasFramePreview({ frame, onAction, iconPaths = {} }: {
+  frame: unknown; onAction?: CanvasAction; iconPaths?: Readonly<Record<string, string>>
+}) {
   if (!isLayer(frame) || frame.type !== 'frame') {
     return <p role="status">无法显示这张画板。</p>
   }
-  return renderLayer(frame, 'frame', onAction)
+  return renderLayer(frame, 'frame', iconPaths, onAction)
 }

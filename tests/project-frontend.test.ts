@@ -71,6 +71,9 @@ test('a project previews and exports its own native boards and dispatches button
   // A regular project's board may have the same display name as the calibration board.
   const first = { id: 'first', type: 'frame', name: 'MCP 中心/default', children: [
     { id: 'first-title', type: 'text', content: '项目里的同名画板' },
+    ...['sun', 'moon', 'refresh-cw', 'palette', '__proto__'].map(name => ({
+      id: name, type: 'icon_font', iconFontName: name, width: 16, height: 16, fill: [{ type: 'solid', color: '#123456' }],
+    })),
   ] }
   const hidden = { ...card, id: 'hidden-board', hidden: true }
   const design = { pages: [{ children: [first] }, { children: [hidden, card] }] }
@@ -83,7 +86,14 @@ test('a project previews and exports its own native boards and dispatches button
   const markup = renderToStaticMarkup(createElement(UiPage))
   assert.match(markup, /项目连接助手/)
   assert.match(markup, /<button\b[^>]*data-layer-id="check-connection"[^>]*><span[^>]*>立即检查<\/span><\/button>/)
-  assert.match(renderToStaticMarkup(createElement(UiPage, { boardId: first.id })), /项目里的同名画板/)
+  const firstPage = renderToStaticMarkup(createElement(UiPage, { boardId: first.id }))
+  assert.match(firstPage, /项目里的同名画板/)
+  const paths = JSON.parse(await readFile(join(projectRoot, 'tokens/preview-icons.json'), 'utf8'))
+  assert.equal([...firstPage.matchAll(/<svg /gu)].length, 4)
+  for (const name of ['sun', 'moon', 'refresh-cw', 'palette']) {
+    assert.ok(firstPage.includes('d="' + paths[name] + '"'), name + ' in exported page')
+    assert.ok(html.includes(paths[name]), name + ' in offline preview bundle')
+  }
   assert.equal(renderToStaticMarkup(createElement(UiPage, { boardId: hidden.id })), '')
 
   const actions: unknown[] = []

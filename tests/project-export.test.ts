@@ -15,6 +15,9 @@ test('publishes complete project-local React exports, coalesces concurrent calls
   await Promise.all([
     copyFile(join(sources, 'export-host.mjs'), join(scratch, 'export-host.mjs')),
     copyFile(join(sources, 'project-binding.mjs'), join(scratch, 'project-binding.mjs')),
+    copyFile(join(sources, 'asset-store.mjs'), join(scratch, 'asset-store.mjs')),
+    copyFile(join(sources, 'agent-editor.mjs'), join(scratch, 'agent-editor.mjs')),
+    copyFile(join(sources, 'conversations.mjs'), join(scratch, 'conversations.mjs')),
     copyFile(join(sources, 'host.mjs'), join(scratch, 'ui-compiler-host.mjs')),
     writeFile(join(scratch, 'editor-host.js'), 'export const isLoopbackRemoteAddress = value => value === "127.0.0.1";'),
     writeFile(join(scratch, 'renderer.js'), 'export const MAX_DOCUMENT_BYTES = 1048576, PRESENTATION_META_KEY = "", createDocumentSnapshotFromText = null, projectDocumentGrant = null;'),
