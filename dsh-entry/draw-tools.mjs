@@ -119,7 +119,7 @@ export function createCompilerDrawTools(editorHost, active) {
   const draw = defineTool({
     name: 'uic_canvas_draw',
     description: 'Draw one shape or text layer on the live UI compiler canvas at the given box. '
-      + 'Use rectangle, ellipse, text, or frame; width and height are pixel numbers. The canvas must already be open, and the new node is selected but unsaved until the sidebar Save action.',
+      + 'Use rectangle, ellipse, text, or frame; width and height are pixel numbers. The canvas must already be open, and the new node is selected in the live canvas. Project canvas changes are saved automatically.',
     parameters: {
       type: { type: 'string', required: true, enum: ['rectangle', 'ellipse', 'text', 'frame'], description: 'Layer type to draw.' },
       name: { type: 'string', description: 'Layer name. Defaults to the type name.' },

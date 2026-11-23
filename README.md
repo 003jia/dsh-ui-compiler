@@ -24,7 +24,7 @@ pnpm exec vite --config harness/vite.config.ts
 
 ## 构建桌面插件
 
-当前桌面集成基于 `@zseven-w/dsh-openpencil@0.1.0-rc.15`，生成版本为 `0.1.0-rc.15.uic.37`。构建器会校验上游包名、版本及两个入口文件的 SHA-256。运行过 `prepare:demo` 后，在仓库根目录执行以下命令。
+当前桌面集成基于 `@zseven-w/dsh-openpencil@0.1.0-rc.15`，生成版本为 `0.1.0-rc.15.uic.39`。构建器会校验上游包名、版本及两个入口文件的 SHA-256。运行过 `prepare:demo` 后，在仓库根目录执行以下命令。
 
 ```sh
 mkdir -p artifacts/upstream
@@ -39,8 +39,10 @@ node dsh-entry/build.mjs artifacts/upstream/package
 
 ```sh
 DSH_RESOURCES="/Applications/DeepSeek Harness.app/Contents/Resources/runtime"
-DSH_DESKTOP_PRIMARY_RUNTIME_DIR="$DSH_RESOURCES/primary-runtime" "$DSH_RESOURCES/cli/bin/dsh" plugin --profile desktop add "file:$PWD/artifacts/dsh-sidebar-button/zseven-w-dsh-openpencil-0.1.0-rc.15.uic.37.tgz" --config.auto-install-peers=false
+DSH_DESKTOP_PRIMARY_RUNTIME_DIR="$DSH_RESOURCES/primary-runtime" "$DSH_RESOURCES/cli/bin/dsh" plugin --profile desktop add "file:$PWD/artifacts/dsh-sidebar-button/zseven-w-dsh-openpencil-0.1.0-rc.15.uic.39.tgz" --config.auto-install-peers=false
 ```
+
+编辑项目画布后，短暂停顿就会自动保存。顶栏显示保存状态，也可以点击「保存」立即写入。打开页面预览时会先保存当前修改。
 
 普通项目的设计稿默认保存到 `design/pages/ui.op`，上传资源默认保存到 `design/assets/`。画布标题栏的「目标目录」可以修改这两个相对目录；配置写入项目的 `.dsh/ui-compiler/config.json`，预览和导出跟随同一绑定。上传文件按内容哈希命名，同一文件重复上传不会产生副本。项目侧栏里的「页面预览」读取该项目已保存的画板。导出的 React 页面位于同一项目的 `design/generated/<内容哈希>/UiPage.tsx`。
 
@@ -73,6 +75,6 @@ DSH_DESKTOP_PRIMARY_RUNTIME_DIR="$DSH_RESOURCES/primary-runtime" "$DSH_RESOURCES
 | `uic_canvas_read` | 按选区、节点 ID 或关键词读取图层、文案与样式。 |
 | `uic_canvas_edit` | 使用最近读取的页面版本，按图层 ID 批量修改文字、样式或结构。 |
 
-工具要求「UI 设计编译器」画布已在项目侧栏打开；写入先进入实时画布，仍需在画布中点击保存才写入 `.op` 文件。编辑器自身不提供箭头/连线节点，插件也不伪造该类型；需要选择或指向时使用 `uic_canvas_select`。
+工具要求「UI 设计编译器」画布已在项目侧栏打开；工具操作会反映在实时画布中，并自动保存到当前项目的 `.op` 文件。编辑器自身不提供箭头/连线节点，插件也不伪造该类型；需要选择或指向时使用 `uic_canvas_select`。
 
 上游 OpenPencil 插件、DSH UI 原语和主题的许可见 `third-party-licenses/`。第三方运行时依赖按各自软件包附带的条款分发。

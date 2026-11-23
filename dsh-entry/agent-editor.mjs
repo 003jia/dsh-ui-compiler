@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 
 export const iconNames = ['sun','moon','bookmark','settings','search','check','link','arrow-right','chevron-down','chevron-right','x','plus',
   'menu','heart','star','trash-2','copy','bell','home','user','folder','download','info','refresh-cw','palette']
@@ -9,6 +10,26 @@ function fail(code) {
 
 const fingerprint = node => createHash('sha256').update(JSON.stringify(node)).digest('hex')
 
+// The frame serializes these two default editor settings; the daemon omits them.
+// Compare only the decoded contents. Never change the source or the recovery data.
+export function compilerRecoveryMatchesSource(sourceJson, recoveryJson) {
+  if (!sourceJson.includes('"editorMeta"') && !recoveryJson.includes('"editorMeta"')) return false
+  try {
+    const source = JSON.parse(sourceJson)
+    const recovery = JSON.parse(recoveryJson)
+    if (!source || !recovery || Array.isArray(source) || Array.isArray(recovery) ||
+        typeof source !== 'object' || typeof recovery !== 'object') return false
+    const hasSourceMeta = Object.hasOwn(source, 'editorMeta')
+    if (hasSourceMeta === Object.hasOwn(recovery, 'editorMeta')) return false
+    const withMeta = hasSourceMeta ? source : recovery
+    if (!isDeepStrictEqual(withMeta.editorMeta, {activePageIndex: 0, preserveAuthoredGeometry: false})) return false
+    delete withMeta.editorMeta
+    return isDeepStrictEqual(source, recovery)
+  } catch {
+    return false
+  }
+}
+
 // The installed host owns the live session and its private operation queue.
 // Bind only these local design operations to that queue, including stale-editor
 // and on-disk source checks. Model output cannot choose a tool or a file.
@@ -17,6 +38,22 @@ export function patchCanvasEditorHost(source) {
       'afead6655bb1de2c76ba61c15644bb2b20403e3e16a42be939b4cc64c652e56f') {
     throw new Error('Unexpected OpenPencil editor host version')
   }
+  const find = "recovery = await this.#recoveryStore.find(session.sourcePath, session.baselineSha256, current.toString('utf8'));"
+  source = source.replace(find, find + `
+                    if (recovery && !recovery.sourceChangedSinceCapture && session.ownerSessionId?.startsWith('uic-sidebar-')) {
+                        const stored = await this.#recoveryStore.read(session.sourcePath, recovery.id);
+                        if (stored && compilerRecoveryMatchesSource(current.toString('utf8'), stored.documentJson)) recovery = undefined;
+                    }`)
+  const capture = '        return this.#recoveryStore.capture({'
+  source = source.replace(capture, `        if (session.ownerSessionId?.startsWith('uic-sidebar-') &&
+            sha256(source) === session.baselineSha256 &&
+            compilerRecoveryMatchesSource(source.toString('utf8'), daemonDocument.documentJson)) {
+            // An older genuine draft may still be awaiting a restore decision.
+            // Leave that record untouched when the live canvas matches disk.
+            return undefined;
+        }
+` + capture)
+  source = "import { compilerRecoveryMatchesSource } from './agent-editor.mjs';\n" + source
   const anchor = '    async getActiveSelection(options = {}) {'
   return source.replace(anchor, `    async withCompilerCanvas(options, operation) {
         const session = this.#activeSession(options.sourcePath, options.ownerSessionId);
@@ -391,8 +428,7 @@ export async function applyCanvasFrame(editorHost, frame, options) {
 
 /**
  * Insert one caller-supplied node, such as an uploaded image, beside the
- * current selection and leave it selected. The node stays unsaved until the
- * user saves the canvas.
+ * current selection and leave it selected. The project canvas saves the change through its editor lifecycle.
  * @param editorHost - managed editor controller.
  * @param node - clean OpenPencil node with numeric bounds.
  * @param options - canvas binding, asset resolver and cancellation signal.

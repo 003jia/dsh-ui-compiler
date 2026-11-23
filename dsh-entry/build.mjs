@@ -5,12 +5,13 @@ import { createRequire } from 'node:module'
 import { dirname, join, sep } from 'node:path'
 import { previewWorkerFiles } from './preview-build.mjs'
 import ts from 'typescript'
+import { patchCompilerAutosave } from './canvas-autosave.mjs'
 import { patchCanvasEditorHost } from './agent-editor.mjs'
 import { patchCompilerEditorProcess, patchCompilerSelectionLaunch } from './selection-runtime.mjs'
 
 const upstreamName = '@zseven-w/dsh-openpencil'
 const upstreamVersion = '0.1.0-rc.15'
-const overlayVersion = '0.1.0-rc.15.uic.37'
+const overlayVersion = '0.1.0-rc.15.uic.39'
 const artifactName = `zseven-w-dsh-openpencil-${overlayVersion}.tgz`
 const hostEntry = 'lib/index.js'
 const clientEntry = 'lib/client.js'
@@ -195,6 +196,7 @@ function build(upstreamPath) {
     // Give the project canvas a compact title row while preserving the upstream
     // save control, lifecycle states and toolbar for ordinary editor sessions.
     client = replaceOnce(client, 'workbenchActions, allowTakeover = true', 'workbenchTitle, workbenchActions, allowTakeover = true')
+    client = patchCompilerAutosave(client, replaceOnce)
     client = replaceOnce(client, 'style: panelStyles.toolbar,', [
       'className: workbenchTitle ? "uic-canvas-toolbar" : undefined,',
       '            style: workbenchTitle ? undefined : panelStyles.toolbar,',
@@ -208,16 +210,31 @@ function build(upstreamPath) {
       '                iframeRef.current?.contentWindow, originRef.current, launchRef.current?.sessionId, signal),',
       '',
     ].join('\n'))
+    client = spliceOnce(client, 'style: panelStyles.status,', [
+      'role: workbenchTitle ? "status" : undefined,',
+      '                    title: workbenchTitle ? (locale === "zh-CN" ? "编辑后自动保存" : "Edits are saved automatically") : undefined,',
+      '                    ',
+    ].join('\n'))
     const originalTitle = '/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", {\n\t\t\t\t\tstyle: panelStyles.title,'
     client = replaceOnce(client, originalTitle, 'workbenchTitle ?? ' + originalTitle)
     client = replaceOnce(client, 'const inject = [\n\t"slots",', 'const inject = [\n\t"remote",\n\t"remote.session",\n\t"layout",\n\t"sessions",\n\t"workspaces",\n\t"slots",')
     const surface = 'if (request === void 0) return null;\n\treturn /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ManagedOpenPencilEditorModal, {'
     client = replaceOnce(client, surface, surface.replace('ManagedOpenPencilEditorModal,', 'request.surface ?? ManagedOpenPencilEditorModal,'))
-    client = spliceOnce(client, '\t\topen(request) {\n\t\t\tif (destroyed || disposing)', '\t\tisOpen(sessionId) { return store.getSnapshot()?.sessionId === sessionId; },\n')
+    client = spliceOnce(client, '\t\topen(request) {\n\t\t\tif (destroyed || disposing)', [
+      '        isOpen(sessionId) { return store.getSnapshot()?.sessionId === sessionId; },',
+      '        async flushCompilerCanvas(workspaceId) {',
+      '            const current = store.getSnapshot();',
+      '            if (!current?.workspaceId || (workspaceId && workspaceId !== current.workspaceId)) return true;',
+      '            return await flushCompilerCanvasChanges(lifecycle, lifecycleController)',
+      '                && current === store.getSnapshot() && !lifecycle.dirty && lifecycle.phase !== "saving";',
+      '        },',
+      '',
+    ].join('\n'))
     client = replaceOnce(client, 'if (previous !== void 0 && !canDiscard()) return false;', [
       'if (request.isCurrent && !request.isCurrent()) return false;',
       '                if (previous?.workspaceId && request.workspaceId && previous.workspaceId !== request.workspaceId) {',
-      '                    if (lifecycle.phase === "saving" || lifecycle.dirty) return false;',
+      '                    if (!await flushCompilerCanvasChanges(lifecycle, lifecycleController) || lifecycle.dirty || destroyed || disposing) return false;',
+      '                    if (request.isCurrent && !request.isCurrent()) return false;',
       '                } else if (previous !== void 0 && !canDiscard()) return false;',
     ].join('\n'))
     client = spliceOnce(client, 'const accepted = store.open(request);',

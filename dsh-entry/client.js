@@ -27,6 +27,16 @@ function readCompilerVisualSelection(frame, origin, sessionId, signal) {
 }
 
 /** Persistent compiler surfaces in the official DSH main panel. */
+async function flushCompilerCanvasChanges(lifecycle, controller) {
+  if (!lifecycle.dirty && lifecycle.phase !== "saving") return true;
+  if (!controller?.flushCompilerAutosave) return false;
+  try {
+    return await controller.flushCompilerAutosave();
+  } catch {
+    return false;
+  }
+}
+
 function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent) {
   const {
     Button, IconChevronLeftOutlineRegular, IconCloseOutlineRegular, IconCodeOutlineRegular,
@@ -62,6 +72,7 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
       previewLoading: "正在生成页面预览…",
       previewSaved: "基于已保存的稿件",
       previewFailed: "页面预览更新失败。",
+      previewSaveFailed: "画布尚未保存。请回到画布查看保存状态，或重试。",
       export: "导出前端",
       exporting: "正在导出…",
       exportReady: "前端入口",
@@ -116,6 +127,7 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
       previewLoading: "Building page preview…",
       previewSaved: "From the saved design",
       previewFailed: "The page preview could not be updated.",
+      previewSaveFailed: "Canvas changes have not been saved. Check the canvas or try again.",
       export: "Export frontend",
       exporting: "Exporting…",
       exportReady: "Frontend entry",
@@ -460,6 +472,9 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
     const signal = AbortSignal.any([disposed.signal, workspaceLifetime.signal, navigation]);
     const isCurrent = () => !signal.aborted && selectedWorkspace()?.workspaceId === workspaceId;
     try {
+      // Finish the previous project's writes before requesting a new document grant.
+      if (!await workbench.flushCompilerCanvas()) return "busy";
+      if (!isCurrent()) return;
       const response = await projectRequest("open", workspaceId, signal, 12000);
       if (!isCurrent()) return;
       if (response.status === 404) return "missing";
@@ -530,8 +545,15 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
     previewRequest?.abort();
     const request = new AbortController();
     previewRequest = request;
+    const isCurrent = () => !request.signal.aborted && !disposed.signal.aborted && selectedWorkspace()?.workspaceId === workspaceId;
     publish({ previewStatus: "loading" });
     try {
+      const workbench = getEditorWorkbenchHost();
+      if (workbench && !await workbench.flushCompilerCanvas(workspaceId)) {
+        if (isCurrent()) publish({ previewStatus: "saveFailed", preview: undefined, exportStatus: undefined, entryPath: undefined });
+        return;
+      }
+      if (!isCurrent()) return;
       const response = await projectRequest("preview", workspaceId, request.signal);
       if (!response.ok) throw new Error("Preview request failed");
       const { html, inputHash, workspaceId: responseId } = await response.json();
@@ -656,6 +678,7 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
     const lastRequest = useRef(null);
     const controller = useRef();
     const current = useRef(INITIAL_EDITOR_LIFECYCLE_STATE);
+    const closeInFlight = useRef(false);
     const [closing, setClosing] = useState(false);
     const [lifecycle, setLifecycle] = useState(INITIAL_EDITOR_LIFECYCLE_STATE);
     const [closeError, setCloseError] = useState(false);
@@ -909,12 +932,16 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
     }
 
     async function closeCanvas() {
-      if (closing || current.current.phase === "saving") return false;
-      if (!confirmEditorClose(current.current.dirty, () => window.confirm(editorModalCopy(locale).discard))) return false;
+      if (closeInFlight.current) return false;
+      closeInFlight.current = true;
       setClosing(true);
       setCloseError(false);
+      const editor = controller.current;
       try {
-        if (controller.current && !await controller.current.requestClose()) {
+        await flushCompilerCanvasChanges(current.current, editor);
+        if (editor !== controller.current) return false;
+        if (!confirmEditorClose(current.current.dirty, () => window.confirm(editorModalCopy(locale).discard))) return false;
+        if (editor && !await editor.requestClose()) {
           setCloseError(true);
           return false;
         }
@@ -925,6 +952,7 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
         setCloseError(true);
         return false;
       } finally {
+        closeInFlight.current = false;
         setClosing(false);
       }
     }
@@ -992,7 +1020,7 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
             jsx(CanvasTitleAction, { icon: IconChevronLeftOutlineRegular, label: labels.chat, onClick: showChat }),
             jsx(CanvasTitleAction, {
               icon: IconCloseOutlineRegular, label: labels.close, iconOnly: true,
-              disabled: closing || lifecycle.phase === "saving", onClick: closeCanvas,
+              disabled: closing, onClick: closeCanvas,
             }),
             closeError ? jsx(Toast, { text: labels.closeFailed, onDone: () => setCloseError(false) }) : null,
           ],
@@ -1060,6 +1088,7 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
     }
 
     const status = state.previewStatus === "loading" ? "previewLoading"
+      : state.previewStatus === "saveFailed" ? "previewSaveFailed"
       : state.previewStatus === "error" ? "previewFailed" : "previewSaved";
     const { workspaceId } = state.workspace;
     const bindingLabel = [t("project"), workspaceTitle(state.workspace), projects.get(workspaceId)?.sourcePath].filter(Boolean).join(" · ");
@@ -1078,7 +1107,7 @@ function mountCompilerSidebarAction(ctx, getEditorWorkbenchHost, getCanvasAgent)
                 jsx("strong", { children: t("preview") }),
                 jsx("span", { className: "uic-project-label", title: bindingLabel, children: bindingLabel }),
                 jsx("span", { className: "uic-preview-status", role: "status", children: t(status) }),
-                state.previewStatus === "error" ? jsx(Button, {
+                (state.previewStatus === "error" || state.previewStatus === "saveFailed") ? jsx(Button, {
                   type: "button", variant: "ghost", size: "sm", onClick: refreshPreview, children: t("retry"),
                 }) : null,
               ],
