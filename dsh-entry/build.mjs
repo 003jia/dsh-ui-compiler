@@ -11,7 +11,7 @@ import { patchCompilerEditorProcess, patchCompilerSelectionLaunch } from './sele
 
 const upstreamName = '@zseven-w/dsh-openpencil'
 const upstreamVersion = '0.1.0-rc.15'
-const overlayVersion = '0.1.0-rc.15.uic.39'
+const overlayVersion = '0.1.0-rc.15.uic.40'
 const artifactName = `zseven-w-dsh-openpencil-${overlayVersion}.tgz`
 const hostEntry = 'lib/index.js'
 const clientEntry = 'lib/client.js'
@@ -130,6 +130,10 @@ function build(upstreamPath) {
     writeFileSync(editorHostFile, patchCompilerSelectionLaunch(patchCanvasEditorHost(readFileSync(editorHostFile, 'utf8'))))
     const processFile = join(stage, 'lib/managed-editor-process.js')
     writeFileSync(processFile, patchCompilerEditorProcess(readFileSync(processFile, 'utf8')))
+    const inventory = readFileSync(join(workspaceRoot, 'tokens/primitives.inventory.json'), 'utf8')
+    if (/import\(\\"(?:\/|[A-Za-z]:)/u.test(inventory)) {
+      throw new Error('Regenerate the portable component inventory with pnpm uic inventory before packaging.')
+    }
     for (const file of previewWorkerFiles) {
       const target = join(stage, previewSources, file)
       mkdirSync(dirname(target), { recursive: true })
@@ -148,19 +152,18 @@ function build(upstreamPath) {
       "",
     ].join('\n')
     const registration = [
-      `    ctx.inject(['typert', 'workspaceRegistry', 'llm', 'agentDefaultModel'], scope => mountCanvasAgent(scope, editorHost, ${JSON.stringify(workspaceRoot)}));`,
+      "    ctx.inject(['typert', 'workspaceRegistry', 'llm', 'agentDefaultModel'], scope => mountCanvasAgent(scope, editorHost));",
       "    ctx.inject(['connection', 'webServer', 'workspaceRegistry'], scope => {",
       "        const lifetime = new AbortController();",
       "        scope.effect(() => () => lifetime.abort(), 'ui-compiler: build lifetime');",
       "        const options = {",
-      `            workspaceRoot: ${JSON.stringify(workspaceRoot)}, workspaceRegistry: scope.workspaceRegistry,`,
+      "            workspaceRegistry: scope.workspaceRegistry,",
       "            requestRejection: req => scope.connection.requestRejection(req),",
       "        };",
       "        const buildProject = (snapshot, exportSource) => buildSavedCompilerPreview({",
       "            ...snapshot, exportSource, signal: lifetime.signal,",
       "            snapshotRoot: import.meta.dirname + '/ui-compiler-preview-worker',",
       "            dependencyRoot: import.meta.dirname + '/ui-compiler-preview-vendor',",
-      "            nodeExecutable: '/Applications/DeepSeek Harness.app/Contents/Resources/runtime/primary-runtime/dependencies/node/bin/node',",
       "        });",
       "        for (const [path, handler] of [",
       "            [COMPILER_CANVAS_ROUTE, attachCompilerCanvasRoute({ ...options, editorHost, controller })],",

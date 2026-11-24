@@ -16,6 +16,26 @@ export function workspaceIdFromRequest(req) {
   return id
 }
 
+// A prepared compiler checkout owns the calibration design. Detect its files
+// in the registered project, so installing the package on another machine or
+// moving the checkout does not redirect the canvas to the build machine.
+async function hasCalibrationCanvas(root) {
+  for (const file of ['ui-compiler.map.json', 'examples/mcp-center.op', 'design/pages/mcp-center.op']) {
+    try {
+      if (!(await lstat(join(root, file))).isFile()) return false
+    } catch (error) {
+      if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false
+      throw error
+    }
+  }
+  // A previously opened regular canvas stays bound to its existing document.
+  try { await lstat(join(root, 'design/pages/ui.op')); return false }
+  catch (error) {
+    if (error.code !== 'ENOENT') throw error
+    return true
+  }
+}
+
 export async function resolveProjectBinding(workspaceRegistry, workspaceId, legacyWorkspaceRoot) {
   if (!validWorkspaceId(workspaceId)) throw new Error('Invalid DSH workspace ID')
   const project = workspaceRegistry.get(workspaceId)
@@ -28,7 +48,7 @@ export async function resolveProjectBinding(workspaceRegistry, workspaceId, lega
   if (workspaceRoot !== project.path || !(await lstat(workspaceRoot)).isDirectory()) {
     throw new Error('Workspace root changed')
   }
-  const legacy = workspaceRoot === legacyWorkspaceRoot
+  const legacy = legacyWorkspaceRoot === undefined ? await hasCalibrationCanvas(workspaceRoot) : workspaceRoot === legacyWorkspaceRoot
   const config = await readProjectConfig(workspaceRoot)
   // A project that never chose a folder keeps the original sample filename in
   // the compiler workspace; every other project saves into its configured

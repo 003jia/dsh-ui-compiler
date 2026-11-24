@@ -36,6 +36,22 @@ test('only registered projects own canvases and a simultaneous first open never 
   await assert.rejects(readFile(old.sourcePath), { code: 'ENOENT' })
 })
 
+test('portable installs recognize a prepared compiler checkout without changing an existing project canvas', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'uic-relocated-checkout-')))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const registry = new Map([['project', { id: 'project', path: root }]])
+  const active = () => resolveProjectBinding(registry, 'project')
+  await mkdir(join(root, 'design/pages'), { recursive: true })
+  await writeFile(join(root, 'design/pages/mcp-center.op'), '{}')
+  assert.equal((await active()).canvasFile, 'design/pages/ui.op')
+  await mkdir(join(root, 'examples'))
+  await writeFile(join(root, 'examples/mcp-center.op'), '{}')
+  await writeFile(join(root, 'ui-compiler.map.json'), '{}')
+  assert.equal((await active()).canvasFile, 'design/pages/mcp-center.op')
+  await writeFile(join(root, 'design/pages/ui.op'), '{}')
+  assert.equal((await active()).canvasFile, 'design/pages/ui.op')
+})
+
 test('project history and preview responses remain distinct even with identical document bytes', async t => {
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'uic-project-owners-')))
   t.after(() => rm(dir, { recursive: true, force: true }))

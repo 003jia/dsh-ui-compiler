@@ -44,6 +44,12 @@ function describeDeclaration(node: ts.Declaration, packageRoot: string): Declara
   }
 }
 
+// The checker may qualify a type with an absolute pnpm dependency path.
+// Persist the package import so the inventory is independent of the checkout.
+function portableType(type: string): string {
+  return type.replace(/import\("(?:\/|[A-Za-z]:\/)[^"]*\/node_modules\/([^"]+)"\)/gu, 'import("$1")')
+}
+
 function returnsReactElement(type: ts.Type): boolean {
   const symbol = type.aliasSymbol ?? type.getSymbol()
   if (symbol && ['ReactElement', 'ReactNode', 'Element'].includes(symbol.name)) {
@@ -119,7 +125,7 @@ export function generateInventory(projectRoot: string): PrimitivesInventory {
         const propType = checker.getTypeOfSymbolAtLocation(prop, origin)
         const values = finiteValues(propType, checker)
         props[prop.name] = {
-          type: checker.typeToString(propType, origin, ts.TypeFormatFlags.NoTruncation),
+          type: portableType(checker.typeToString(propType, origin, ts.TypeFormatFlags.NoTruncation)),
           required: !(prop.flags & ts.SymbolFlags.Optional),
           declaration: describeDeclaration(origin, packageRoot),
           ...(values ? { values } : {}),

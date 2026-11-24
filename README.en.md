@@ -4,9 +4,24 @@
 
 DSH UI Editor brings an editable OpenPencil canvas into your DeepSeek Harness desktop project. Ask two agents to sketch different settings screens and compare them side by side. Like the layout of the first one but want a different button? Select it and ask, “Use a refresh icon and change the label to ‘Check for updates.’” The edited layers stay in your project, ready to preview or export as a React page.
 
-[Try the focus timer walkthrough](#design-two-cards-for-a-focus-app) · [Run the included demo](#set-up-the-development-environment) · [Build and install the desktop plugin](#build-and-install-the-desktop-plugin)
+[Install in DSH](#quick-install) · [Try the focus timer walkthrough](#design-two-cards-for-a-focus-app) · [Run the included demo](#set-up-the-development-environment) · [Build and install the desktop plugin](#build-and-install-the-desktop-plugin)
 
 ![The DSH project canvas with an editable layer tree and six artboards, including a focus timer, daily stats, and appearance settings](docs/images/canvas.png)
+
+## Quick install
+
+For DeepSeek Harness desktop on Apple Silicon Macs. Keep DSH online during installation so it can download the plugin and the matching OpenPencil runtime.
+
+1. Open **Plugins** (插件) in DSH and click **Add plugin** (添加插件).
+2. Copy the full URL below into **Package name or address** (包名或地址) and click **Install** (安装).
+
+   ```text
+   https://github.com/003jia/dsh-ui-compiler/releases/download/v0.1.0-rc.15.uic.40/dsh-ui-editor-mac-arm64.tgz
+   ```
+
+3. Click **Enable now** (立即启用). Open a local project and choose **UI Design Compiler** (UI 设计编译器) in the sidebar to open the canvas.
+
+If you already downloaded the `.tgz`, paste its absolute file path into the same field. [Download page and SHA-256 checksum](https://github.com/003jia/dsh-ui-compiler/releases/tag/v0.1.0-rc.15.uic.40)
 
 ## When to use it
 
@@ -95,7 +110,7 @@ pnpm exec vite --config harness/vite.config.ts
 
 ## Build and install the desktop plugin
 
-The desktop integration builds `0.1.0-rc.15.uic.39` from `@zseven-w/dsh-openpencil@0.1.0-rc.15`. The builder checks the upstream package name and version and verifies the SHA-256 hashes of both entry files. After running `prepare:demo`, run the following commands from the repository root.
+The desktop integration builds `0.1.0-rc.15.uic.40` from `@zseven-w/dsh-openpencil@0.1.0-rc.15`. The builder checks the upstream package name and version and verifies the SHA-256 hashes of both entry files. After running `prepare:demo`, run the following commands from the repository root.
 
 ```sh
 mkdir -p artifacts/upstream
@@ -104,13 +119,13 @@ tar -xzf artifacts/upstream/zseven-w-dsh-openpencil-0.1.0-rc.15.tgz -C artifacts
 node dsh-entry/build.mjs artifacts/upstream/package
 ```
 
-The package is written to `artifacts/dsh-sidebar-button/`. This build is intended for local use and records its build directory to identify the calibration project. The preview worker runs with the Node.js runtime bundled with the macOS DSH app. The integration targets DSH UI dependencies at version `0.2.2-alpha.2`.
+The package is written to `artifacts/dsh-sidebar-button/`. The package includes the code and dependencies for page previews. The preview worker runs with the Node.js runtime bundled with the macOS DSH app. The integration targets DSH UI dependencies at version `0.2.2-alpha.2`.
 
 On macOS, save your work and quit DSH. From the same directory, run the desktop app’s bundled CLI to install the plugin. Reopen DSH, select a project on your local disk, and click **UI Design Compiler** (UI 设计编译器) in the project sidebar.
 
 ```sh
 DSH_RESOURCES="/Applications/DeepSeek Harness.app/Contents/Resources/runtime"
-DSH_DESKTOP_PRIMARY_RUNTIME_DIR="$DSH_RESOURCES/primary-runtime" "$DSH_RESOURCES/cli/bin/dsh" plugin --profile desktop add "file:$PWD/artifacts/dsh-sidebar-button/zseven-w-dsh-openpencil-0.1.0-rc.15.uic.39.tgz" --config.auto-install-peers=false
+DSH_DESKTOP_PRIMARY_RUNTIME_DIR="$DSH_RESOURCES/primary-runtime" "$DSH_RESOURCES/cli/bin/dsh" plugin --profile desktop add "file:$PWD/artifacts/dsh-sidebar-button/zseven-w-dsh-openpencil-0.1.0-rc.15.uic.40.tgz" --config.auto-install-peers=false
 ```
 
 The [third-party licenses](third-party-licenses/) cover the upstream OpenPencil plugin, DSH UI primitives, and themes. Third-party runtime dependencies are distributed under the terms included with each package.

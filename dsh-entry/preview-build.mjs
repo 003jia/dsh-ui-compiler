@@ -149,11 +149,18 @@ export async function buildCompilerPreview(workspaceRoot, hasCompiledPage = true
   return { html, inputHash }
 }
 
+function previewNodeExecutable() {
+  if (process.platform !== 'darwin' || !process.versions.electron) return process.execPath
+  const primary = process.env.DSH_DESKTOP_PRIMARY_RUNTIME_DIR
+    || join(dirname(process.execPath), '..', 'Resources', 'runtime', 'primary-runtime')
+  return join(primary, 'dependencies', 'node', 'bin', 'node')
+}
+
 /** Compile a verified saved design in a subprocess using only packaged code and dependencies. */
 export async function buildSavedCompilerPreview({
   snapshotRoot,
   dependencyRoot,
-  nodeExecutable = process.execPath,
+  nodeExecutable = previewNodeExecutable(),
   source,
   inputHash,
   signal,

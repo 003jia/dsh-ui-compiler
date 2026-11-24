@@ -4,9 +4,24 @@
 
 DSH UI 编辑器把 OpenPencil 画布放进 DeepSeek Harness 桌面版的项目里。你可以让两个 Agent 各画一版设置页，把方案并排放在画布上。喜欢第一版的布局，但想换个按钮？选中它，告诉 Agent「换成刷新图标，文字改成『检查更新』」。改好的图层会保存在项目里，可以直接预览，也可以导出为 React 页面。
 
-[试画一个专注计时器](#用两张卡片走一遍) · [运行仓库自带的示例](#准备开发环境) · [构建和安装桌面插件](#构建桌面插件)
+[在 DSH 内快速安装](#快速安装) · [试画一个专注计时器](#用两张卡片走一遍) · [运行仓库自带的示例](#准备开发环境) · [构建和安装桌面插件](#构建桌面插件)
 
 ![正式 DSH 项目画布，左侧是可编辑图层，中间是专注计时、今日统计和外观设置等六张画板](docs/images/canvas.png)
+
+## 快速安装
+
+适用于 Apple 芯片 Mac 上的 DeepSeek Harness 桌面版。安装时请保持联网，DSH 会下载插件和对应的 OpenPencil 运行时。
+
+1. 在 DSH 打开 **插件 → 添加插件**。
+2. 复制下面整行地址，粘贴到 **包名或地址**，点击 **安装**。
+
+   ```text
+   https://github.com/003jia/dsh-ui-compiler/releases/download/v0.1.0-rc.15.uic.40/dsh-ui-editor-mac-arm64.tgz
+   ```
+
+3. 安装完成后点击 **立即启用**。打开一个本地项目，在侧栏点击 **UI 设计编译器** 就能进入画布。
+
+如果已手动下载 `.tgz`，也可以把它的本地绝对路径粘贴到同一输入框。[下载页及 SHA-256 校验文件](https://github.com/003jia/dsh-ui-compiler/releases/tag/v0.1.0-rc.15.uic.40)
 
 ## 什么时候用它
 
@@ -95,7 +110,7 @@ pnpm exec vite --config harness/vite.config.ts
 
 ## 构建桌面插件
 
-当前桌面集成基于 `@zseven-w/dsh-openpencil@0.1.0-rc.15`，生成版本为 `0.1.0-rc.15.uic.39`。构建器会校验上游包名、版本及两个入口文件的 SHA-256。运行过 `prepare:demo` 后，在仓库根目录执行以下命令。
+当前桌面集成基于 `@zseven-w/dsh-openpencil@0.1.0-rc.15`，生成版本为 `0.1.0-rc.15.uic.40`。构建器会校验上游包名、版本及两个入口文件的 SHA-256。运行过 `prepare:demo` 后，在仓库根目录执行以下命令。
 
 ```sh
 mkdir -p artifacts/upstream
@@ -104,13 +119,13 @@ tar -xzf artifacts/upstream/zseven-w-dsh-openpencil-0.1.0-rc.15.tgz -C artifacts
 node dsh-entry/build.mjs artifacts/upstream/package
 ```
 
-产物会出现在 `artifacts/dsh-sidebar-button/`。该构建为本机使用，会记录构建目录来识别校准项目。预览工作进程使用 macOS DSH 应用包附带的 Node.js。适配所用 DSH UI 依赖版本为 `0.2.2-alpha.2`。
+产物会出现在 `artifacts/dsh-sidebar-button/`。打包时包含预览所需的代码和依赖。预览工作进程使用 macOS DSH 应用包附带的 Node.js。适配所用 DSH UI 依赖版本为 `0.2.2-alpha.2`。
 
 在 macOS 上，保存工作并退出 DSH，然后在同一目录使用桌面版自带的 CLI 安装。安装后重新打开 DSH，在本地磁盘项目的侧栏点击「UI 设计编译器」。
 
 ```sh
 DSH_RESOURCES="/Applications/DeepSeek Harness.app/Contents/Resources/runtime"
-DSH_DESKTOP_PRIMARY_RUNTIME_DIR="$DSH_RESOURCES/primary-runtime" "$DSH_RESOURCES/cli/bin/dsh" plugin --profile desktop add "file:$PWD/artifacts/dsh-sidebar-button/zseven-w-dsh-openpencil-0.1.0-rc.15.uic.39.tgz" --config.auto-install-peers=false
+DSH_DESKTOP_PRIMARY_RUNTIME_DIR="$DSH_RESOURCES/primary-runtime" "$DSH_RESOURCES/cli/bin/dsh" plugin --profile desktop add "file:$PWD/artifacts/dsh-sidebar-button/zseven-w-dsh-openpencil-0.1.0-rc.15.uic.40.tgz" --config.auto-install-peers=false
 ```
 
 上游 OpenPencil 插件、DSH UI 原语和主题的许可见 [第三方许可](third-party-licenses/)。第三方运行时依赖按各自软件包附带的条款分发。
