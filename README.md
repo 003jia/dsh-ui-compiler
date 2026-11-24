@@ -10,18 +10,26 @@ DSH UI 编辑器把 OpenPencil 画布放进 DeepSeek Harness 桌面版的项目�
 
 ## 快速安装
 
-适用于 Apple 芯片 Mac 上的 DeepSeek Harness 桌面版。下面的安装包包含编辑器、画布运行时和页面预览所需的文件。
+在 **苹果菜单 → 关于本机** 查看芯片或处理器，按下面的型号复制对应安装地址。两个包都内置了匹配的 OpenPencil 画布运行时和页面预览工具。
 
-1. 在 DSH 打开 **插件 → 添加插件**。
-2. 复制下面整行地址，粘贴到 **包名或地址**，点击 **安装**。
+**Intel Mac**（处理器显示 Intel）· `x64` · DSH 桌面版 `0.2.1-rc.4`
 
-   ```text
-   https://github.com/003jia/dsh-ui-compiler/releases/download/v0.1.0-rc.15.uic.40/dsh-ui-editor-mac-arm64.tgz
-   ```
+```text
+https://github.com/003jia/dsh-ui-compiler/releases/download/v0.1.0-rc.15.uic.41/dsh-ui-editor-mac-x64.tgz
+```
 
-3. 安装完成后点击 **立即启用**。打开一个本地项目，在侧栏点击 **UI 设计编译器** 就能进入画布。
+**Apple 芯片 Mac**（芯片显示 Apple M 系列）· `arm64` · DSH 桌面版 `0.2.2-rc.5`
 
-如果已手动下载 `.tgz`，也可以把它的本地绝对路径粘贴到同一输入框。[下载页及 SHA-256 校验文件](https://github.com/003jia/dsh-ui-compiler/releases/tag/v0.1.0-rc.15.uic.40)
+```text
+https://github.com/003jia/dsh-ui-compiler/releases/download/v0.1.0-rc.15.uic.40/dsh-ui-editor-mac-arm64.tgz
+```
+
+1. 在 DSH 打开 **插件 → 添加插件**，把对应的地址粘贴到 **包名或地址**，点击 **安装**。
+2. 点击 **立即启用**，打开本地项目，在侧栏选择 **UI 设计编译器**。
+
+也可以下载 `.tgz`，将文件的绝对路径粘贴到同一输入框。下载页提供 SHA-256 校验文件。[Intel Mac 下载页](https://github.com/003jia/dsh-ui-compiler/releases/tag/v0.1.0-rc.15.uic.41) · [Apple 芯片 Mac 下载页](https://github.com/003jia/dsh-ui-compiler/releases/tag/v0.1.0-rc.15.uic.40)
+
+Intel 包已在 Apple 芯片 Mac 上用 Rosetta 运行官方 x64 版 DSH，验证了安装、启用、画布读稿、页面预览和 React 导出。实体 Intel Mac 尚待实机验证。
 
 ## 什么时候用它
 
@@ -110,24 +118,34 @@ pnpm exec vite --config harness/vite.config.ts
 
 ## 构建桌面插件
 
-当前桌面集成基于 `@zseven-w/dsh-openpencil@0.1.0-rc.15`，生成版本为 `0.1.0-rc.15.uic.40`。构建器会校验上游包名、版本、补丁涉及的入口文件和内置运行时文件的 SHA-256。在 Apple 芯片 Mac 上运行 `prepare:demo` 后，可以从仓库根目录构建同款安装包。
+两个 macOS 包都基于 `@zseven-w/dsh-openpencil@0.1.0-rc.15`。在仓库根目录运行 `prepare:demo`，再解包共用的上游插件。构建时会校验上游代码、内置运行时和原生工具。
 
 ```sh
-mkdir -p artifacts/upstream artifacts/native-mac-arm64
+mkdir -p artifacts/upstream
 npm pack @zseven-w/dsh-openpencil@0.1.0-rc.15 --ignore-scripts --pack-destination artifacts/upstream
 tar -xzf artifacts/upstream/zseven-w-dsh-openpencil-0.1.0-rc.15.tgz -C artifacts/upstream
+```
+
+**构建 Intel Mac 包（uic.41）**
+
+```sh
+mkdir -p artifacts/native-mac-x64 artifacts/esbuild-mac-x64
+npm pack @zseven-w/dsh-openpencil-darwin-x64@0.1.0-rc.15 --ignore-scripts --pack-destination artifacts/native-mac-x64
+tar -xzf artifacts/native-mac-x64/zseven-w-dsh-openpencil-darwin-x64-0.1.0-rc.15.tgz -C artifacts/native-mac-x64
+npm pack @esbuild/darwin-x64@0.25.12 --ignore-scripts --pack-destination artifacts/esbuild-mac-x64
+tar -xzf artifacts/esbuild-mac-x64/esbuild-darwin-x64-0.25.12.tgz -C artifacts/esbuild-mac-x64
+node dsh-entry/build.mjs artifacts/upstream/package --bundle-darwin-x64 artifacts/native-mac-x64/package artifacts/esbuild-mac-x64/package
+```
+
+**在 Apple 芯片 Mac 上构建 arm64 包（uic.40）**
+
+```sh
+mkdir -p artifacts/native-mac-arm64
 npm pack @zseven-w/dsh-openpencil-darwin-arm64@0.1.0-rc.15 --ignore-scripts --pack-destination artifacts/native-mac-arm64
 tar -xzf artifacts/native-mac-arm64/zseven-w-dsh-openpencil-darwin-arm64-0.1.0-rc.15.tgz -C artifacts/native-mac-arm64
 node dsh-entry/build.mjs artifacts/upstream/package --bundle-darwin-arm64 artifacts/native-mac-arm64/package
 ```
 
-产物会出现在 `artifacts/dsh-sidebar-button/`。打包时包含预览所需的代码和依赖。预览工作进程使用 macOS DSH 应用包附带的 Node.js。适配所用 DSH UI 依赖版本为 `0.2.2-alpha.2`。
-
-在 macOS 上，保存工作并退出 DSH，然后在同一目录使用桌面版自带的 CLI 安装。安装后重新打开 DSH，在本地磁盘项目的侧栏点击「UI 设计编译器」。
-
-```sh
-DSH_RESOURCES="/Applications/DeepSeek Harness.app/Contents/Resources/runtime"
-DSH_DESKTOP_PRIMARY_RUNTIME_DIR="$DSH_RESOURCES/primary-runtime" "$DSH_RESOURCES/cli/bin/dsh" plugin --profile desktop add "file:$PWD/artifacts/dsh-sidebar-button/zseven-w-dsh-openpencil-0.1.0-rc.15.uic.40.tgz" --config.auto-install-peers=false
-```
+构建产物位于 `artifacts/dsh-sidebar-button/`。将目标架构对应的 `.tgz` 绝对路径填入 DSH 的 **插件 → 添加插件**，即可安装本地构建。
 
 上游 OpenPencil 插件、DSH UI 原语和主题的许可见 [第三方许可](third-party-licenses/)。第三方运行时依赖按各自软件包附带的条款分发。
