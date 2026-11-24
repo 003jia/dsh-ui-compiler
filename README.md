@@ -10,7 +10,7 @@ DSH UI 编辑器把 OpenPencil 画布放进 DeepSeek Harness 桌面版的项目�
 
 ## 快速安装
 
-适用于 Apple 芯片 Mac 上的 DeepSeek Harness 桌面版。安装时请保持联网，DSH 会下载插件和对应的 OpenPencil 运行时。
+适用于 Apple 芯片 Mac 上的 DeepSeek Harness 桌面版。下面的安装包包含编辑器、画布运行时和页面预览所需的文件。
 
 1. 在 DSH 打开 **插件 → 添加插件**。
 2. 复制下面整行地址，粘贴到 **包名或地址**，点击 **安装**。
@@ -110,13 +110,15 @@ pnpm exec vite --config harness/vite.config.ts
 
 ## 构建桌面插件
 
-当前桌面集成基于 `@zseven-w/dsh-openpencil@0.1.0-rc.15`，生成版本为 `0.1.0-rc.15.uic.40`。构建器会校验上游包名、版本及两个入口文件的 SHA-256。运行过 `prepare:demo` 后，在仓库根目录执行以下命令。
+当前桌面集成基于 `@zseven-w/dsh-openpencil@0.1.0-rc.15`，生成版本为 `0.1.0-rc.15.uic.40`。构建器会校验上游包名、版本、补丁涉及的入口文件和内置运行时文件的 SHA-256。在 Apple 芯片 Mac 上运行 `prepare:demo` 后，可以从仓库根目录构建同款安装包。
 
 ```sh
-mkdir -p artifacts/upstream
+mkdir -p artifacts/upstream artifacts/native-mac-arm64
 npm pack @zseven-w/dsh-openpencil@0.1.0-rc.15 --ignore-scripts --pack-destination artifacts/upstream
 tar -xzf artifacts/upstream/zseven-w-dsh-openpencil-0.1.0-rc.15.tgz -C artifacts/upstream
-node dsh-entry/build.mjs artifacts/upstream/package
+npm pack @zseven-w/dsh-openpencil-darwin-arm64@0.1.0-rc.15 --ignore-scripts --pack-destination artifacts/native-mac-arm64
+tar -xzf artifacts/native-mac-arm64/zseven-w-dsh-openpencil-darwin-arm64-0.1.0-rc.15.tgz -C artifacts/native-mac-arm64
+node dsh-entry/build.mjs artifacts/upstream/package --bundle-darwin-arm64 artifacts/native-mac-arm64/package
 ```
 
 产物会出现在 `artifacts/dsh-sidebar-button/`。打包时包含预览所需的代码和依赖。预览工作进程使用 macOS DSH 应用包附带的 Node.js。适配所用 DSH UI 依赖版本为 `0.2.2-alpha.2`。

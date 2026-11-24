@@ -21,6 +21,7 @@ const previewBuild = 'lib/ui-compiler-preview-build.mjs'
 const previewSources = 'lib/ui-compiler-preview-worker'
 const previewVendor = 'lib/ui-compiler-preview-vendor'
 const upstreamHashes = {
+  'lib/editor-runtime.js': '859b1012e1dd8396dfff93fc285275228a889f8c332c858aa8f86c175f078ca3',
   [hostEntry]: '1471dac77ec3cee88509b453e8f1048c072f7941ac8807712fba58652c524a8e',
   [clientEntry]: '2c4be0f7d0c8f44f53d3cdb447410d2b11a11a9d076f8c6154fcd1f46d900453',
 }
@@ -92,7 +93,55 @@ function replaceOnce(code, anchor, replacement) {
   return code.replace(anchor, () => replacement)
 }
 
-function build(upstreamPath) {
+// The native package ships its own SHA-256 file inventory. Pin the inventory
+// and its adjacent metadata, then copy only those exact files into the release.
+function stageAppleSiliconRuntime(source, stage, manifest) {
+  const platform = 'darwin-arm64'
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') {
+    throw new Error('Build the Apple Silicon release on macOS arm64 to include the matching esbuild.')
+  }
+  const destination = 'npm/' + platform
+  const metadata = {
+    'openpencil-runtime.json': '5f11bcc98a47f1a893d713c014c3c413d3d9ba3485abcf9375347c2aa333ef77',
+    'package.json': '6c12748b50a90294ba708ff01f842c48ab9e005e7f74f27ecdfb6da6db341904',
+    'LICENSE': '07810262dcd2df061e16ae24c3a9a7a3cd265ddfc2bfb073544cd11af22d7812',
+    'THIRD_PARTY_NOTICES.md': '06b6ae7706cd7e2650c44d9403397206556b12c796ff9595ff80d22f0ec82b90',
+  }
+  function copyVerified(file, expected) {
+    const bytes = readFileSync(join(source, file))
+    if (createHash('sha256').update(bytes).digest('hex') !== expected) {
+      throw new Error('Pinned Apple Silicon runtime checksum mismatch: ' + file)
+    }
+    const target = join(stage, destination, file)
+    mkdirSync(dirname(target), { recursive: true })
+    writeFileSync(target, bytes, { mode: file === 'bin/op-host-web-server' ? 0o755 : 0o644 })
+  }
+  for (const [file, digest] of Object.entries(metadata)) copyVerified(file, digest)
+  const inventory = JSON.parse(readFileSync(join(stage, destination, 'openpencil-runtime.json'), 'utf8'))
+  for (const [file, digest] of Object.entries(inventory.files)) copyVerified(file, digest)
+
+  const catalogPath = join(stage, 'platforms.json')
+  const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'))
+  catalog.platforms = catalog.platforms.filter(entry => entry.id === platform)
+  writeFileSync(catalogPath, JSON.stringify(catalog, null, 2) + '\n')
+  // Respect explicit upstream overrides. Otherwise always resolve from this
+  // install, even when an older optional package is visible in a parent tree.
+  const resolver = join(stage, 'lib/editor-runtime.js')
+  const code = readFileSync(resolver, 'utf8')
+  writeFileSync(resolver, spliceOnce(code, '    const resolvePackageJson = options.resolvePackageJson', [
+    "    if (platform.id === 'darwin-arm64') {",
+    "        return validateRuntimeRoot(join(projectRoot, 'npm', platform.id), 'development-package', expected, io);",
+    "    }",
+    "",
+  ].join('\n')))
+  manifest.os = ['darwin']
+  manifest.cpu = ['arm64']
+  delete manifest.optionalDependencies
+  manifest.files.push(destination)
+  return [...Object.keys(metadata), ...Object.keys(inventory.files)].map(file => destination + '/' + file)
+}
+
+function build(upstreamPath, nativePath) {
   const upstream = realpathSync(upstreamPath)
   const workspaceRoot = realpathSync(join(import.meta.dirname, '..'))
   const manifest = JSON.parse(readFileSync(join(upstream, 'package.json'), 'utf8'))
@@ -110,6 +159,7 @@ function build(upstreamPath) {
   try {
     const stage = join(temporary, 'upstream')
     cpSync(upstream, stage, { recursive: true })
+    const nativeFiles = nativePath ? stageAppleSiliconRuntime(nativePath, stage, manifest) : []
     cpSync(join(import.meta.dirname, 'host.mjs'), join(stage, hostHelper))
     cpSync(join(import.meta.dirname, 'preview-host.mjs'), join(stage, previewRoute))
     cpSync(join(import.meta.dirname, 'preview-build.mjs'), join(stage, previewBuild))
@@ -276,11 +326,17 @@ function build(upstreamPath) {
       throw new Error('The packaged name or version does not match the overlay.')
     }
     const files = new Set(packed.files.map(file => file.path))
-    for (const file of [hostEntry, clientEntry, hostHelper, previewRoute, previewBuild, ...agentFiles,
+    for (const file of [hostEntry, clientEntry, hostHelper, previewRoute, previewBuild, ...agentFiles, ...nativeFiles,
       ...previewWorkerFiles.map(file => join(previewSources, file)), previewVendor + '/vite/package.json',
       previewVendor + '/rollup/dist/wasm-node/bindings_wasm_bg.wasm',
       ...fontFiles.map(file => 'lib/fonts/' + file), 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'cordis.patch.yml', 'platforms.json']) {
       if (!files.has(file)) throw new Error(`Packaged overlay is missing ${file}`)
+    }
+    if (nativePath) {
+      for (const path of ['npm/darwin-arm64/bin/op-host-web-server', previewVendor + '/@esbuild/darwin-arm64/bin/esbuild']) {
+        const file = packed.files.find(item => item.path === path)
+        if (!file || !(file.mode & 0o111)) throw new Error('Missing executable in Apple Silicon release: ' + path)
+      }
     }
     const artifactPath = join(output, artifactName)
     renameSync(join(temporary, artifactName), artifactPath)
@@ -291,8 +347,11 @@ function build(upstreamPath) {
 }
 
 try {
-  if (process.argv.length !== 3) throw new Error('Usage: node dsh-entry/build.mjs <original-rc.15-directory>')
-  build(process.argv[2])
+  const [upstream, option, native, ...extra] = process.argv.slice(2)
+  if (!upstream || extra.length || (option !== undefined && (option !== '--bundle-darwin-arm64' || !native))) {
+    throw new Error('Usage: node dsh-entry/build.mjs <original-rc.15-directory> [--bundle-darwin-arm64 <native-rc.15-directory>]')
+  }
+  build(upstream, native)
 } catch (error) {
   console.error(error.message)
   process.exitCode = 1

@@ -10,7 +10,7 @@ DSH UI Editor brings an editable OpenPencil canvas into your DeepSeek Harness de
 
 ## Quick install
 
-For DeepSeek Harness desktop on Apple Silicon Macs. Keep DSH online during installation so it can download the plugin and the matching OpenPencil runtime.
+For DeepSeek Harness desktop on Apple Silicon Macs. This package includes the editor, the OpenPencil runtime, and the files needed for page previews.
 
 1. Open **Plugins** (插件) in DSH and click **Add plugin** (添加插件).
 2. Copy the full URL below into **Package name or address** (包名或地址) and click **Install** (安装).
@@ -110,13 +110,15 @@ pnpm exec vite --config harness/vite.config.ts
 
 ## Build and install the desktop plugin
 
-The desktop integration builds `0.1.0-rc.15.uic.40` from `@zseven-w/dsh-openpencil@0.1.0-rc.15`. The builder checks the upstream package name and version and verifies the SHA-256 hashes of both entry files. After running `prepare:demo`, run the following commands from the repository root.
+The desktop integration builds `0.1.0-rc.15.uic.40` from `@zseven-w/dsh-openpencil@0.1.0-rc.15`. The builder checks the upstream package name and version and verifies the SHA-256 hashes of the patched entry points and the embedded runtime files. To build the same self-contained package on an Apple Silicon Mac, run `prepare:demo` and then run these commands from the repository root.
 
 ```sh
-mkdir -p artifacts/upstream
+mkdir -p artifacts/upstream artifacts/native-mac-arm64
 npm pack @zseven-w/dsh-openpencil@0.1.0-rc.15 --ignore-scripts --pack-destination artifacts/upstream
 tar -xzf artifacts/upstream/zseven-w-dsh-openpencil-0.1.0-rc.15.tgz -C artifacts/upstream
-node dsh-entry/build.mjs artifacts/upstream/package
+npm pack @zseven-w/dsh-openpencil-darwin-arm64@0.1.0-rc.15 --ignore-scripts --pack-destination artifacts/native-mac-arm64
+tar -xzf artifacts/native-mac-arm64/zseven-w-dsh-openpencil-darwin-arm64-0.1.0-rc.15.tgz -C artifacts/native-mac-arm64
+node dsh-entry/build.mjs artifacts/upstream/package --bundle-darwin-arm64 artifacts/native-mac-arm64/package
 ```
 
 The package is written to `artifacts/dsh-sidebar-button/`. The package includes the code and dependencies for page previews. The preview worker runs with the Node.js runtime bundled with the macOS DSH app. The integration targets DSH UI dependencies at version `0.2.2-alpha.2`.
